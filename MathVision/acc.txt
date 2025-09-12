@@ -1,0 +1,3 @@
+Accuracy: 0.1414
+Correct: 43/304
+Percentage: 14.14%
