@@ -1,13 +1,13 @@
-# MathVision Evaluation
+# MathVista Evaluation
 
-This directory contains the evaluation setup for MathVision benchmark.
+This directory contains the evaluation setup for MathVista benchmark.
 
 ## 文件结构
 
 ```
-MathVision/
+MathVista/
 ├── readme.md                    # 本文档
-├── MathVision_testmini.json      # 测试数据集
+├── MathVista_testmini.json      # 测试数据集
 ├── images/                      # 图片文件夹 (需要从官方下载)
 │   ├── 1.jpg
 │   ├── 2.jpg
@@ -18,16 +18,16 @@ MathVision/
 ## QuickStart
 
 ### Step 1: 准备 images.zip
-从 MathVision 官方仓库或对应的 benchmark 源下载图片数据包：
+从 MathVista 官方仓库或对应的 benchmark 源下载图片数据包：
 ```bash
 cd vprm # 根目录
-cd MathVision
-wget ..../images.zip
+cd MathVista
+wget https://github.com/lupantech/MathVista/releases/download/v1.0/images.zip
 ```
 
 ### Step 2: 解压图片文件
 ```bash
-cd MathVision
+cd MathVista
 unzip images.zip
 ```
 
@@ -59,10 +59,10 @@ bash judge.sh
 ```
 
 ## 数据说明
-- `MathVision_testmini.json`: 包含测试样本，每个样本包含问题、答案和对应的图片路径。这个json从parquet转换而来
+- `MathVista_testmini.json`: 包含测试样本，每个样本包含问题、答案和对应的图片路径。这个json从parquet转换而来
 - `images/`: 存放所有测试图片，文件名对应 JSON 中的图片 ID
 
 ## 注意事项
 1. 图片文件较大，已在 `.gitignore` 中忽略，需要手动下载
 2. 确保图片路径与 JSON 文件中的路径对应
-3. inference流程首先会去*_inference.jsonl文件里找已经推理过的id并且排除掉。
+3. 评测时请确保模型能够处理多模态输入（文本+图像）

@@ -1,23 +1,16 @@
 """In MathVista, the prompt can be directly get from 'query' field."""
 
 import io
-from PIL import Image
-import matplotlib.pyplot as plt
-
-
-path = "data/testmini-00000-of-00001-725687bf7a18d64b.parquet"
 import os
 import json
+import argparse
 from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
 import random
-
-# read parquet file
 import pandas as pd
-df = pd.read_parquet(path)
-print(df.columns)
-filtered_df = df
+from multiprocessing import Pool, cpu_count
+from tqdm import tqdm
 
 
 def answer2choiceLetter(answer: str, options: list) -> str:
@@ -38,29 +31,6 @@ def answer2choiceLetter(answer: str, options: list) -> str:
 def single_record(record: dict):
     """
     Convert a single record to the desired template format.
-    example record:
-    {'pid': '20',
- 'question': 'Is the sum of smallest two bar is greater then the largest bar?',
- 'image': 'images/20.jpg',
- 'decoded_image': {'bytes': b'...'
-  'path': '20.jpg'},
- 'choices': array(['Yes', 'No'], dtype=object),
- 'unit': None,
- 'precision': nan,
- 'answer': 'No',
- 'question_type': 'multi_choice',
- 'answer_type': 'text',
- 'metadata': {'category': 'general-vqa',
-  'context': 'bar chart',
-  'grade': 'daily life',
-  'img_height': 600,
-  'img_width': 850,
-  'language': 'english',
-  'skills': array(['statistical reasoning'], dtype=object),
-  'source': 'ChartQA',
-  'split': 'testmini',
-  'task': 'figure question answering'},
-  'query': 'Hint: Please answer the question and provide the correct option letter, e.g., A, B, C, D, at the end.\nQuestion: Is the sum of smallest two bar is greater then the largest bar?\nChoices:\n(A) Yes\n(B) No'}
     """
     converted_template = {
         "id":"",
@@ -84,29 +54,39 @@ def single_record(record: dict):
 
     return converted_template
 
-if __name__ == "__main__":
-    # Test the function with the first record
-    df = filtered_df
 
-    # multiprocessing for all records
+def main():
+    parser = argparse.ArgumentParser(description='Convert MathVista parquet file to JSON format')
+    parser.add_argument('--input_file', type=str, required=True, 
+                       help='Path to input parquet file')
+    parser.add_argument('--output_file', type=str, required=True,
+                       help='Path to output JSON file')
+    
+    args = parser.parse_args()
+    
+    # Check if input file exists
+    if not os.path.exists(args.input_file):
+        print(f"Error: Input file {args.input_file} does not exist!")
+        return
+    
+    print(f"Reading parquet file: {args.input_file}")
+    df = pd.read_parquet(args.input_file)
+    
+    # Convert dataframe to list of dictionaries
     processed_lsts = [row.to_dict() for i, row in df.iterrows()]
-
     print(f"Total {len(processed_lsts)} records to process.")
 
-    from multiprocessing import Pool, cpu_count
-    from tqdm import tqdm
-
+    # Process records using multiprocessing
     with Pool(cpu_count()) as p:
         results = list(tqdm(p.map(single_record, processed_lsts), total=len(processed_lsts)))
 
-    # Save results to jsonl file
-    import json
-    print('------- Saving results to JSON file -------')
-    output_json = "MathVista_testmini.json"
-    # save results to json file
-    with open(output_json, 'w', encoding='utf-8') as f:
+    # Save results to JSON file
+    print(f'Saving results to JSON file: {args.output_file}')
+    with open(args.output_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, ensure_ascii=False, indent=4)
-    # with open(output_jsonl, 'w', encoding='utf-8') as f:
-    #     for item in results:
-    #         f.write(json.dumps(item) + '\n')
     
+    print(f"Conversion completed! Output saved to {args.output_file}")
+
+
+if __name__ == "__main__":
+    main()
