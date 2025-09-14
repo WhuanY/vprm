@@ -8,3 +8,23 @@
 # Optional: Also ignore common log directories
 logs/
 **logs/
+
+# Ignore large model files
+*.bin
+*.safetensors
+*.onnx
+*.pt
+*.pth
+*.model
+*.pkl
+
+# Ignore dataset files
+*.csv
+*.tsv
+*.parquet
+
+# Ignore large directories
+models/
+checkpoints/
+data/
+datasets/
