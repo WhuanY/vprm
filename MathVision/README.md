@@ -3,16 +3,28 @@
 This directory contains the evaluation setup for MathVision benchmark.
 
 ## 文件结构
-
 ```
 MathVision/
-├── readme.md                    # 本文档
-├── MathVision_testmini.json      # 测试数据集
+├── README.md                    # 本文档
+├── data/                        # 数据目录
+│   ├── MathVision_testmini.json          # 测试数据集
+│   ├── MathVision_inferenced.jsonl      # 推理结果文件
+│   ├── MathVision_judge_results.jsonl   # 评判结果文件
+│   ├── MathVision_judge_results_metrics.json # 评测指标
+│   ├── test-00000-of-00001-*.parquet     # 原始parquet文件
+│   └── testmini-00000-of-00001-*.parquet # 原始parquet文件
 ├── images/                      # 图片文件夹 (需要从官方下载)
 │   ├── 1.jpg
 │   ├── 2.jpg
 │   └── ...
-└── eval_scripts/                # 评测脚本 (如果有)
+├── parquet_to_json.py           # 数据格式转换脚本
+├── inference.py                 # 推理脚本
+├── inference.sh                 # 推理执行脚本
+├── judge.py                     # 评判脚本
+├── judge.sh                     # 评判执行脚本
+├── judge.log                    # 评判日志
+├── see_neg.py                   # 查看负样本脚本
+└── see_pos.py                   # 查看正样本脚本
 ```
 
 ## QuickStart
