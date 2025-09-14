@@ -1,0 +1,10 @@
+# Ignore all files in any images directory (but keep the directory structure)
+**/images/*
+
+# Ignore all log files everywhere
+*.log
+**/*.log
+
+# Optional: Also ignore common log directories
+logs/
+**logs/
