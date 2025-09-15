@@ -2,7 +2,7 @@ import pandas as pd
 
 
 # read parquet file
-path = "data/testmini-00000-of-00001-f8ff70fcb2f29b1d.parquet"
+path = "data/test-00000-of-00001-3532b8d3f1b4047a.parquet"
 
 df = pd.read_parquet(path)
 
@@ -58,7 +58,7 @@ for lst in processed_lsts:
 # Save results to jsonl file
 import json
 print('------- Saving results to JSON file -------')
-output_json = "MathVision_testmini.json"
+output_json = "MathVision_test.json"
 # save results to json file
 with open(output_json, 'w', encoding='utf-8') as f:
     json.dump(results, f, ensure_ascii=False, indent=4)

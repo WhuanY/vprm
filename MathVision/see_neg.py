@@ -60,7 +60,7 @@ def print_analysis(samples):
         if i % 10 == 0:  # 每10个样本暂停一下
             input("Press Enter to continue...")
 
-def save_to_csv(samples, output_file='judgment_0_analysis.csv'):
+def save_to_csv(samples, output_file='judgment_0_analysis-qwen25vl3b-instresult.csv'):
     """保存结果到CSV文件"""
     import csv
     
@@ -72,7 +72,7 @@ def save_to_csv(samples, output_file='judgment_0_analysis.csv'):
     print(f"Results saved to {output_file}")
 
 if __name__ == "__main__":
-    jsonl_file = "MathVision_judge_results.jsonl"  # 替换为你的文件名
+    jsonl_file = "data/MathVision_judge_qwen25vl3b-instresults.jsonl"  # 替换为你的文件名
     
     # 分析judgement为0的样本
     samples = analyze_judgment_0(jsonl_file)

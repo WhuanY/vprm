@@ -72,7 +72,7 @@ def save_to_csv(samples, output_file='judgment_0_analysis.csv'):
     print(f"Results saved to {output_file}")
 
 if __name__ == "__main__":
-    jsonl_file = "MathVision_judge_results.jsonl"  # 替换为你的文件名
+    jsonl_file = "data/MathVista_judge_results_qwen25vl3b-inst.jsonl"  # 替换为你的文件名
     
     # 分析judgement为0的样本
     samples = analyze_judgment_0(jsonl_file)

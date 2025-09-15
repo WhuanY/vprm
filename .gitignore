@@ -28,3 +28,7 @@ models/
 checkpoints/
 data/
 datasets/
+
+**/*.zip
+
+test/
