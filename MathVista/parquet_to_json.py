@@ -6,7 +6,6 @@ import json
 import argparse
 from PIL import Image
 import numpy as np
-import matplotlib.pyplot as plt
 import random
 import pandas as pd
 from multiprocessing import Pool, cpu_count
@@ -61,8 +60,15 @@ def main():
                        help='Path to input parquet file')
     parser.add_argument('--output_file', type=str, required=True,
                        help='Path to output JSON file')
+    parser.add_argument('--sample_ratio', type=float, default=1.0,
+                       help='Ratio of data to sample (0.0-1.0, default: 1.0 for all data)')
     
     args = parser.parse_args()
+    
+    # Validate sample_ratio
+    if not 0.0 < args.sample_ratio <= 1.0:
+        print(f"Error: sample_ratio must be between 0.0 and 1.0, got {args.sample_ratio}")
+        return
     
     # Check if input file exists
     if not os.path.exists(args.input_file):
@@ -71,6 +77,20 @@ def main():
     
     print(f"Reading parquet file: {args.input_file}")
     df = pd.read_parquet(args.input_file)
+    print(f"Original dataset size: {len(df)}")
+    
+    # Sample data if sample_ratio < 1.0
+    if args.sample_ratio < 1.0:
+        sample_size = int(len(df) * args.sample_ratio)
+        print(f"Sampling {sample_size} records (ratio: {args.sample_ratio})")
+        
+        # Set random seed for reproducibility
+        random.seed(42)
+        np.random.seed(42)
+        
+        # Random sampling
+        df = df.sample(n=sample_size, random_state=42).reset_index(drop=True)
+        print(f"Sampled dataset size: {len(df)}")
     
     # Convert dataframe to list of dictionaries
     processed_lsts = [row.to_dict() for i, row in df.iterrows()]
@@ -86,6 +106,7 @@ def main():
         json.dump(results, f, ensure_ascii=False, indent=4)
     
     print(f"Conversion completed! Output saved to {args.output_file}")
+    print(f"Final output contains {len(results)} records")
 
 
 if __name__ == "__main__":

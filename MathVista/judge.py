@@ -228,20 +228,112 @@ def run_judge_evaluation(inputs, llm, tokenizer, args):
     return results
 
 def calculate_metrics(results):
-    """Calculate evaluation metrics"""
+    """Calculate evaluation metrics with rule-based correction"""
     total_samples = len(results)
-    correct_judgments = sum(1 for r in results if r["judgment"] == 1)
-    accuracy = correct_judgments / total_samples if total_samples > 0 else 0
+    
+    # 原始准确率（基于judge模型的判断）
+    correct_judgments_llm = sum(1 for r in results if r["judgment"] == 1)
+    llm_acc = correct_judgments_llm / total_samples if total_samples > 0 else 0
+    
+    # 修正后的准确率（对judgment=0的情况进行规则修正）
+    corrected_judgments = 0
+    rule_corrections = 0
+    
+    def normalize_answer(answer):
+        """标准化答案格式"""
+        if not answer:
+            return ""
+        answer = str(answer).strip().lower()
+        # 移除常见的标点符号
+        answer = answer.replace(".", "").replace(",", "").replace("!", "").replace("?", "")
+        return answer
+    
+    # def is_choice_match(extracted, standard):
+    #     """检查选择题答案是否匹配"""
+    #     # 提取字母选项 A, B, C, D
+    #     import re
+    #     extracted_choice = re.search(r'\b([A-Za-z])\b', extracted)
+    #     standard_choice = re.search(r'\b([A-Za-z])\b', standard)
+        
+    #     if extracted_choice and standard_choice:
+    #         return extracted_choice.group(1).upper() == standard_choice.group(1).upper()
+    #     return False
+    
+    def is_numeric_match(extracted, standard):
+        """检查数值答案是否匹配"""
+        import re
+        try:
+            # 提取数字
+            extracted_nums = re.findall(r'-?\d+\.?\d*', extracted)
+            standard_nums = re.findall(r'-?\d+\.?\d*', standard)
+            
+            if extracted_nums and standard_nums:
+                return float(extracted_nums[-1]) == float(standard_nums[-1])
+        except:
+            pass
+        return False
+    
+    for r in results:
+        if r["judgment"] == 1:
+            # 原本就正确的
+            corrected_judgments += 1
+        else:
+            # judgment=0的情况，进行规则修正
+            model_extracted = r.get("model_response_ans_extracted", "")
+            standard_answer = r.get("standard_answer", "")
+            
+            is_correct = False
+            
+            # 规则1: 完全匹配（标准化后）
+            if normalize_answer(model_extracted) == normalize_answer(standard_answer):
+                print("-"*100)
+                print("[INFO] judgement = 0 but exact match found.")
+                print("model_extracted:", model_extracted)
+                print("standard_answer:", standard_answer)
+                print("-"*100)
+                is_correct = True
+            
+            # # 规则2: 选择题字母匹配
+            # elif is_choice_match(model_extracted, standard_answer):
+            #     print("-"*100)
+            #     print("[INFO] judgement = 0 but choice match found.")
+            #     print("model_extracted:", model_extracted)
+            #     print("standard_answer:", standard_answer)
+            #     print("-"*100)
+            #     is_correct = True
+            
+            # 规则3: 数值匹配
+            elif is_numeric_match(model_extracted, standard_answer):
+                print("-"*100)
+                print("[INFO] judgement = 0 but numeric match found.")
+                print("model_extracted:", model_extracted)
+                print("standard_answer:", standard_answer)
+                print("-"*100)
+                is_correct = True
+            
+            if is_correct:
+                corrected_judgments += 1
+                rule_corrections += 1
+    
+    acc = corrected_judgments / total_samples if total_samples > 0 else 0
     
     print(f"\n=== Judge Evaluation Results ===")
     print(f"Total samples: {total_samples}")
-    print(f"Correct judgments: {correct_judgments}")
-    print(f"Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)")
+    print(f"LLM Judge correct judgments: {correct_judgments_llm}")
+    print(f"LLM Judge accuracy (llm_acc): {llm_acc:.4f} ({llm_acc*100:.2f}%)")
+    print(f"Rule corrections applied: {rule_corrections}")
+    print(f"Corrected judgments: {corrected_judgments}")
+    print(f"Final accuracy (acc): {acc:.4f} ({acc*100:.2f}%)")
+    print(f"Improvement: {(acc - llm_acc)*100:.2f} percentage points")
     
     return {
         "total_samples": total_samples,
-        "correct_judgments": correct_judgments,
-        "accuracy": accuracy
+        "correct_judgments_llm": correct_judgments_llm,
+        "llm_acc": llm_acc,
+        "rule_corrections": rule_corrections,
+        "corrected_judgments": corrected_judgments,
+        "acc": acc,
+        "improvement": acc - llm_acc
     }
 
 def main(args):
