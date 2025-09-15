@@ -15,9 +15,9 @@ unzip data.zip
 ⚠️因为原始数据庞大，MME只在Lite集合上做过测试，Lite集合的处理首先处理了image字段，保证其能够打开。
 ```bash
 # 确保已经确认全局Bench数据的image的路径，然后按照实际情况调整这个py脚本中的三个目录
-# NEW_DIR= // 如果我没推断错，应该是在data/MME-Realworld-Total/img下
-# ORIGINAL_JSON="MME_RealWorld_Lite.json" 
-# OUTPUT_JSON="MME-RealWorld_Lite_new.json"
+# NEW_DIR=存储图片的根目录
+# ORIGINAL_JSON="MME_RealWorld_Lite.json"  # 可以改
+# OUTPUT_JSON="MME-RealWorld_Lite_new.json" # 可以改
 python preprocess_image.py
 ```
 ❓判断图片路径有没有对上？打开`MME-RealWorld_Lite_new.json`，看看文件中的img路径能不能打开。

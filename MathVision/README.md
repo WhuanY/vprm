@@ -34,7 +34,7 @@ MathVision/
 ```bash
 cd vprm # 根目录
 cd MathVision
-wget ..../images.zip
+wget ..../images.zip # 从官方提供的路径下载图片包
 ```
 
 ### Step 2: 解压图片文件
