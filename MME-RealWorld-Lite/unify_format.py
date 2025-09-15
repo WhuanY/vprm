@@ -39,23 +39,31 @@ answer_w_choices -> Ground truth # This benchmark has no standalone problem stat
 Image_new -> image
 """
 
-input_file = "MME-RealWorld-Lite_new.json"
-output_file = "MME-RealWorld-Lite_unified.json"
-
 import json
 from tqdm import tqdm
+import argparse
 
+# 设置命令行参数
+parser = argparse.ArgumentParser(description="Convert JSON file format for MME-RealWorld-Lite.")
+parser.add_argument('--input_file', type=str, required=True, help="Path to the input JSON file.")
+parser.add_argument('--output_file', type=str, required=True, help="Path to save the output JSON file.")
+args = parser.parse_args()
+
+input_file = args.input_file
+output_file = args.output_file
+
+# 数据处理
 with open(input_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
     for item in tqdm(data):
         item['id'] = item.pop('Question_id')
         item['problem'] = ""
         options = item.pop('Answer choices', [])
-        if options and len(options) > 1: # 如果是多选题
+        if options and len(options) > 1:  # 如果是多选题
             item['problem_w_choices'] = item.pop('Text') + "\n" + ' '.join(options)
             item['answer_w_choices'] = item.pop('Ground truth')
             item['answer'] = ""
-        else: #如果不是多选题
+        else:  # 如果不是多选题
             item['problem'] = item.pop('Text')
             item['answer'] = item.pop('Ground truth')
             item['problem_w_choices'] = ""
@@ -66,7 +74,8 @@ with open(input_file, 'r', encoding='utf-8') as f:
             if key in item:
                 item.pop(key)
 
+# 写入输出文件
 with open(output_file, 'w', encoding='utf-8') as f:
     json.dump(data, f, indent=4, ensure_ascii=False)
     print(f"Saved unified data to {output_file}")
-
+    
