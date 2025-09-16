@@ -11,19 +11,36 @@ import pandas as pd
 from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
 
-
 def save_image_from_bytes(image_bytes, filename):
-    """Save image bytes to file"""
+    """Save image bytes to file - direct binary write approach"""
     try:
-        image = Image.open(io.BytesIO(image_bytes))
+        # 检查是否为WEBP格式并调整文件名
+        if image_bytes.startswith(b'RIFF') and b'WEBP' in image_bytes[:12]:
+            print(f"Detected WEBP format for {filename}")
+            filename = filename.replace('.jpg', '.webp')
+        elif image_bytes.startswith(b'\xFF\xD8\xFF'):
+            # JPEG格式
+            filename = filename.replace('.webp', '.jpg')
+        elif image_bytes.startswith(b'\x89PNG'):
+            # PNG格式
+            filename = filename.replace('.jpg', '.png').replace('.webp', '.png')
+        
+        # 创建目录
         image_path = f"images/{filename}"
         os.makedirs("images", exist_ok=True)
-        image.save(image_path)
+        
+        # 直接写入字节数据
+        with open(image_path, 'wb') as f:
+            f.write(image_bytes)
+        
+        print(f"Successfully saved {filename} ({len(image_bytes)} bytes)")
         return image_path
+        
     except Exception as e:
         print(f"Error saving image {filename}: {e}")
         return None
-
+        
+        return None
 
 def single_record(record: dict, index: int):
     """

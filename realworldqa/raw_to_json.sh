@@ -4,7 +4,7 @@
 
 # 默认参数
 INPUT_FILE="data/test-00000-of-00002.parquet"
-OUTPUT_FILE="RealWorldQA_test.json"
+OUTPUT_FILE="data/RealWorldQA_test-02.json"
 SAMPLE_RATIO=1.0
 
 # 解析命令行参数
