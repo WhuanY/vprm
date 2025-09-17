@@ -32,3 +32,5 @@ datasets/
 **/*.zip
 
 test/
+
+*_official/

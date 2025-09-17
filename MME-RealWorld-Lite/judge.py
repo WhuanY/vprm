@@ -8,6 +8,7 @@ def extract_answer_from_response(response):
     提取response中最后一个<answer>标签的内容
     对于单选题和多选题都适用
     """
+    ans_pattern = ["(A)", "(B)", "(C)", "(D)", "(E)"]
     ans = ""
     if not response:
         return None
@@ -27,8 +28,20 @@ def extract_answer_from_response(response):
         ans = "No <answer> tag found"
     
     if ans == "No <answer> tag found":
+        
         print(f"Warning: {ans} in response: {response}")
-    
+        # 尝试从response中提取选项，如果extracted_answer中包含**单一**选项，则返回该选项
+        # 防止模型输出多个选项仍然判断正确，
+        extracted_options = [opt for opt in ans_pattern if opt in response]
+        if len(extracted_options) == 1:
+            ans = extracted_options[0]
+            # mapping: (A) -> A, (B) -> B, ...
+            ans = ans.replace("(", "").replace(")", "")
+            print("Warning: Extracted single option from response:", ans)
+            assert ans in ["A", "B", "C", "D", "E"]
+        else:
+            ans = "No <answer> tag found"
+       
     return ans
 
 
@@ -85,7 +98,7 @@ def calculate_unweighted_average(subcategory_results):
 
 def main(args):
     """
-    MMERealWorld-Lite全部都是多选题，所以就不用模型判断了
+    MMERealWorld-Lite全部都是多选题，所以只对模糊选项使用LLM做判断
     """
     input_file = args.input_file
     

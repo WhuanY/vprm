@@ -149,19 +149,6 @@ def check_generated(args, raw_dataset):
     return filtered_data
 
 def main(args):
-    processor = AutoProcessor.from_pretrained(args.model_name_or_path)
-    llm = LLM(
-        model=args.model_name_or_path,
-        trust_remote_code=True,
-        tensor_parallel_size=args.tp,
-        limit_mm_per_prompt={"image": 10, "video": 2},
-        gpu_memory_utilization=0.9,
-        # enforce_eager=True,
-        # mm_processor_kwargs={
-        #     "min_pixels": 28 * 28,
-        #     "max_pixels": 1024 * 1024,
-        # },
-    )
     print(f"开始处理MathVista数据集: {args.input_file}")
     (f"是否包含图片: {bool(args.has_images)}")
     
@@ -186,6 +173,7 @@ def main(args):
     if os.path.exists(args.save_name):
         raw_dataset = check_generated(args, raw_dataset)
 
+    processor = AutoProcessor.from_pretrained(args.model_name_or_path)
     inputs = load_dataset(
         raw_dataset,
         processor,
@@ -196,7 +184,19 @@ def main(args):
         args,
     )
     
-    
+    llm = LLM(
+        model=args.model_name_or_path,
+        trust_remote_code=True,
+        tensor_parallel_size=args.tp,
+        limit_mm_per_prompt={"image": 10, "video": 2},
+        gpu_memory_utilization=0.9,
+        # enforce_eager=True,
+        # mm_processor_kwargs={
+        #     "min_pixels": 28 * 28,
+        #     "max_pixels": 1024 * 1024,
+        # },
+    )
+
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_name_or_path, trust_remote_code=True
     )
