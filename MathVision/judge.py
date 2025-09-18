@@ -41,7 +41,6 @@ def extract_answer_from_response(response):
         return "No <answer> tag found"
     
     
-
 def load_inference_results(input_file):
     """Load inference results from jsonl file"""
     data = []

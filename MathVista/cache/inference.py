@@ -1,4 +1,7 @@
 import json
+from typing import List
+import base64
+from openai import OpenAI
 from transformers import AutoTokenizer, AutoProcessor
 from qwen_vl_utils import process_vision_info
 import tqdm
@@ -6,6 +9,93 @@ from vllm import LLM, SamplingParams
 from argparse import ArgumentParser
 import os
 from datetime import datetime
+
+class LocalServerClient:
+    def __init__(self, model_path, api_url="http://localhost:9753/v1"):
+        self.client = OpenAI(
+            api_key="EMPTY",  # vLLM doesn't require real API key
+            base_url=api_url
+        )
+        self.model_path = model_path
+
+    def generate(self, batch_inputs:List[dict], sampling_param:SamplingParams):
+        """
+        do batch inference by submitting batch request to local vLLM server
+        """
+        outputs = []
+        for inp in batch_inputs:
+            # print(inp)
+            # print("*"*10)
+            chat_completion_from_base64 = self.client.chat.completions.create(
+                messages=inp,
+                model = self.model_path,
+                max_tokens=sampling_param.max_tokens,
+                temperature=sampling_param.temperature,
+            )
+        outputs.append(chat_completion_from_base64)
+        return outputs
+            
+
+def encode_base64_content_from_file(img_path):
+    """
+    Encode image file to base64 string
+    """
+    with open(img_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
+
+
+def load_dataset_openai_fmt(
+    raw_dataset,
+    system_prompt,
+    pre_prompt,
+    args
+):
+    inputs = []
+    print(f"Loading {len(raw_dataset)} examples...")
+    
+    for idx, data in enumerate(tqdm.tqdm(raw_dataset)):
+        # 检查是否存在images字段
+        has_images = "image" in data and data["image"] and args.has_images
+        
+        # 根据record内容自动判断问题类型和选择问题字段
+        is_multiple_choice = False
+        
+        if data['problem_w_choices'] != "":
+            is_multiple_choice = True
+            assert data['problem'] == ""
+        # 获取原始问题
+        if is_multiple_choice:
+            problem = data["problem_w_choices"]
+        else:
+            problem = data["problem"]
+        
+        # print("problem with hint: ", problem)
+        
+        if args.pre_prompt:
+            problem = args.pre_prompt + "\n" + problem
+
+        if args.after_prompt:
+            problem = problem + "\n" + args.after_prompt
+
+        msg = [
+            {
+                "role": "user",
+                "content": [
+                    {"type":"text", "text": problem},
+                    {
+                        "type": "image_url", 
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{encode_base64_content_from_file(data['image'][0])}"
+                        } 
+                    }
+                ]
+            }
+        ]
+        inputs.append(msg)
+        # # save msg to json 
+        # with open(f"debug_msg_{idx}.json", "w") as f:
+        #     json.dump(inputs, f, indent=4)
+    return inputs
 
 def load_dataset(
     raw_dataset, 
@@ -76,7 +166,7 @@ def load_dataset(
             messages.insert(0, {"role": "system", "content": system_prompt})
         
         # 详细记录构建的messages结构
-        print(messages)
+        # print(messages)
         
         # 注释掉模型相关的处理，但保留结构
         prompt = processor.apply_chat_template(
@@ -107,10 +197,12 @@ def load_dataset(
     mc_count = sum(1 for inp in inputs if inp.get("question_type") == "multiple_choice")
     num_count = len(inputs) - mc_count
 
-    print("----inputs----"*40)
-    print(inputs[0])
+    # print("----inputs----"*40)
+    # print(inputs[0])
     
     return inputs
+
+
 
 def load_jsonl(path):
     data = []
@@ -170,33 +262,30 @@ def main(args):
     
     if os.path.exists(args.save_name):
         raw_dataset = check_generated(args, raw_dataset)
+    
+    if args.inference_api: # 兼容OpenAI客户端的接口
+        inputs = load_dataset_openai_fmt(
+            raw_dataset,
+            args.system_prompt,
+            args.pre_prompt,
+            args
+        )
 
-    inputs = load_dataset(
-        raw_dataset,
-        processor,
-        args.modality,
-        args.system_prompt,
-        args.pre_prompt,
-        args.hdfs,
-        args,
-    )
+    else: # 使用本地加载的数据集
+        inputs = load_dataset(
+            raw_dataset,
+            processor,
+            args.modality,
+            args.system_prompt,
+            args.pre_prompt,
+            args.hdfs,
+            args,
+        )
     
     # 注释掉模型推理部分，但保留结构
-    llm = LLM(
-        model=args.model_name_or_path,
-        trust_remote_code=True,
-        tensor_parallel_size=args.tp,
-        limit_mm_per_prompt={"image": 10, "video": 2},
-        gpu_memory_utilization=0.9,
-        # enforce_eager=True,
-        # mm_processor_kwargs={
-        #     "min_pixels": 28 * 28,
-        #     "max_pixels": 1024 * 1024,
-        # },
-    )
     tokenizer = AutoTokenizer.from_pretrained(
-        args.model_name_or_path, trust_remote_code=True
-    )
+            args.model_name_or_path, trust_remote_code=True
+        )
     sampling_params = SamplingParams(
         temperature=args.temperature,
         top_p=args.top_p,
@@ -206,6 +295,21 @@ def main(args):
         stop_token_ids=[tokenizer.eos_token_id]
         + tokenizer.additional_special_tokens_ids,
     )
+    if not args.inference_api:
+        llm = LLM(
+            model=args.model_name_or_path,
+            trust_remote_code=True,
+            tensor_parallel_size=args.tp,
+            limit_mm_per_prompt={"image": 10, "video": 2},
+            gpu_memory_utilization=0.9,
+            # enforce_eager=True,
+            # mm_processor_kwargs={
+            #     "min_pixels": 28 * 28,
+            #     "max_pixels": 1024 * 1024,
+            # },
+        )
+    else: # 使用API方式
+        llm = LocalServerClient(model_path=args.model_name_or_path, api_url=args.inference_api)
 
     if not args.bz:
         bz = len(raw_dataset)
@@ -215,7 +319,7 @@ def main(args):
     unfinish_cnt = 0 # 统计未生成完成的样本数量（通常是超过max_new_tokens)
     for idx in range(0, len(inputs), bz):
         batch_inputs = inputs[idx : idx + bz]
-        outputs = llm.generate(batch_inputs, sampling_params=sampling_params)
+        outputs = llm.generate(batch_inputs, sampling_param=sampling_params)
 
         with open(args.save_name, "a", encoding="utf-8") as f:
             for i in range(len(outputs)):
@@ -255,6 +359,7 @@ if __name__ == "__main__":
     
     parser.add_argument("--model_name_or_path", type=str, 
                     default="/home/minyingqian/models/Qwen2.5-VL-7B-Instruct")
+    parser.add_argument("--inference_api", type=str, default="") # 如果为空，则使用本地模型推理
     parser.add_argument("--input_file", type=str, default="MATH-V_testmini.json")
     parser.add_argument("--save_name", type=str, default="MATH-V_testmini_output.jsonl")
     parser.add_argument("--modality", type=str, default="image")

@@ -156,8 +156,9 @@ def run_judge_evaluation(inputs, llm, tokenizer, args):
                 batch_prompts.append({"prompt": inp["prompt"]})
         
         # Generate judgments
-        outputs = llm.generate(batch_prompts, sampling_params=sampling_params)
-        
+        if args.model_name_or_path: # 使用本地模型
+            outputs = llm.generate(batch_prompts, sampling_params=sampling_params)
+
         # Process outputs
         for i, output in enumerate(outputs):
             original_idx = idx + i

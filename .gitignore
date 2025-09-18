@@ -21,7 +21,7 @@ logs/
 # Ignore dataset files
 *.csv
 *.tsv
-*.parquet
+**/*.parquet
 
 # Ignore large directories
 models/
@@ -34,3 +34,5 @@ datasets/
 test/
 
 *_official/
+
+tmp/**
