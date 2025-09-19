@@ -8,83 +8,7 @@ import os
 from datetime import datetime
 
 
-final_prompt = "Select the best answer to the above multiple-choice question based on the image. \
-Respond with only the letter (A, B, C, D, or E) of the correct option. \nThe best answer is:',"
-
-
-def _process_single_item_helper(data_with_args):
-    """处理单个数据项的辅助函数（模块级别）"""
-    data_with_idx, processor, modality, system_prompt, pre_prompt, args, final_prompt = data_with_args
-    idx, data = data_with_idx
-    
-    # 检查是否存在images字段
-    has_images = "image" in data and data["image"] and args.has_images
-    
-    # 根据record内容自动判断问题类型和选择问题字段
-    is_multiple_choice = False
-    problem_key = "problem_w_choices"  # 默认使用problem
-    
-    if data['problem_w_choices'] != "":
-        is_multiple_choice = True
-        assert data['problem'] == ""
-        problem_key = "problem_w_choices"
-
-    
-    # 获取原始问题
-    if is_multiple_choice:
-        problem = data["problem_w_choices"]
-    else:
-        problem = data["problem"]
-
-    problem = problem + "\n" + final_prompt
-    
-    if args.pre_prompt:
-        problem = args.pre_prompt + "\n" + problem
-
-    if args.after_prompt:
-        problem = problem + "\n" + args.after_prompt
-
-    # 但需要添加<image>标记用于多模态处理
-    if '<image>' not in problem and has_images:
-        problem = '<image>\n' + problem
-    
-    # 构建消息内容
-    if has_images:
-        # 处理包含图片的情况
-        text_parts = problem.split("<image>")
-        content = []
-        
-        for i in range(len(data["image"])):
-            if i < len(text_parts):
-                if text_parts[i].strip():
-                    content.append({"type": "text", "text": text_parts[i].strip()})
-            content.append({"type": "image", "image": data["image"][i]})
-        
-        # 添加最后一段文本（如果存在）
-        if len(text_parts) > len(data["image"]) and text_parts[-1].strip():
-            content.append({"type": "text", "text": text_parts[-1].strip()})
-    else:
-        # 处理纯文本情况
-        content = [{"type": "text", "text": problem}]
-
-    # 构建消息
-    messages = [{"role": "user", "content": content}]
-    if system_prompt:
-        messages.insert(0, {"role": "system", "content": system_prompt})
-    
-    # 注释掉模型相关的处理，但保留结构
-    prompt = processor.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
-    
-    if has_images:
-        from qwen_vl_utils import process_vision_info
-        image_data, _ = process_vision_info(messages)
-        result = {"prompt": prompt, "multi_modal_data": {modality: image_data}}
-    else:
-        result = {"prompt": prompt}
-    
-    return idx, result
+final_prompt = ""
 
 def load_dataset(
     raw_dataset, 
@@ -95,42 +19,95 @@ def load_dataset(
     hdfs, 
     args
 ):
-    from multiprocessing import Pool, cpu_count
-    
+    inputs = []
     print(f"Loading {len(raw_dataset)} examples...")
     
-    # 准备数据：为每个数据项添加索引
-    indexed_data = list(enumerate(raw_dataset))
-    
-    # 需要定义 final_prompt，如果没有定义，请添加
-    final_prompt = ""  # 或者从args中获取，如 args.final_prompt
-    
-    # 准备传递给每个进程的参数
-    process_args = [
-        (data_item, processor, modality, system_prompt, pre_prompt, args, final_prompt)
-        for data_item in indexed_data
-    ]
-    
-    # 确定进程数量
-    num_processes = min(cpu_count(), len(raw_dataset), 50)
-    print(f"Using {num_processes} processes for parallel processing...")
-    
-    # 使用多进程处理
-    with Pool(processes=num_processes) as pool:
-        results = list(tqdm.tqdm(
-            pool.imap(_process_single_item_helper, process_args),
-            total=len(process_args),
-            desc="Processing items"
-        ))
-    
-    # 按原始顺序排序结果
-    results.sort(key=lambda x: x[0])
-    
-    # 提取处理后的数据
-    inputs = [result[1] for result in results]
+    for idx, data in enumerate(tqdm.tqdm(raw_dataset)):
+        # 检查是否存在images字段
+        has_images = "image" in data and data["image"] and args.has_images
+        
+        # 根据record内容自动判断问题类型和选择问题字段
+        is_multiple_choice = False
+        problem_key = "problem_w_choices"  # 默认使用problem
+        
+        if data['problem_w_choices'] != "":
+            is_multiple_choice = True
+            assert data['problem'] == ""
+            problem_key = "problem_w_choices"
+
+        
+        # 获取原始问题
+        if is_multiple_choice:
+            problem = data["problem_w_choices"]
+        else:
+            problem = data["problem"]
+
+        problem = problem + "\n" + final_prompt
+        
+        if args.pre_prompt:
+            problem = args.pre_prompt + "\n" + problem
+
+        if args.after_prompt:
+            problem = problem + "\n" + args.after_prompt
+
+        print(problem)
+
+        # 但需要添加<image>标记用于多模态处理
+        if '<image>' not in problem and has_images:
+            problem = '<image>\n' + problem
+        
+        # 构建消息内容
+        if has_images:
+            # 处理包含图片的情况
+            text_parts = problem.split("<image>")
+            content = []
+            
+            for i in range(len(data["image"])):
+                if i < len(text_parts):
+                    if text_parts[i].strip():
+                        content.append({"type": "text", "text": text_parts[i].strip()})
+                content.append({"type": "image", "image": data["image"][i]})
+            
+            # 添加最后一段文本（如果存在）
+            if len(text_parts) > len(data["image"]) and text_parts[-1].strip():
+                content.append({"type": "text", "text": text_parts[-1].strip()})
+        else:
+            # 处理纯文本情况
+            content = [{"type": "text", "text": problem}]
+
+        # 构建消息
+        messages = [{"role": "user", "content": content}]
+        if system_prompt:
+            messages.insert(0, {"role": "system", "content": system_prompt})
+        
+        # 详细记录构建的messages结构
+        print(messages)
+        
+        # 注释掉模型相关的处理，但保留结构
+        prompt = processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        
+        if has_images:
+            image_data, _ = process_vision_info(messages)
+            inputs.append(
+                {"prompt": prompt, "multi_modal_data": {modality: image_data}}
+            )
+        else:
+            inputs.append({"prompt": prompt})
+        
+        # 保存messages用于后续处理
+        # input_item = {
+        #     "messages": messages,
+        #     "question_type": "multiple_choice" if is_multiple_choice else "numerical",
+        #     "problem_key_used": problem_key,
+        #     "data_id": data.get('id', 'unknown')
+        # }
+        
+        # inputs.append(input_item)
+        # print(f"添加到inputs列表，当前总数: {len(inputs)}")
     
     return inputs
-
 
 def load_jsonl(path):
     data = []
@@ -288,7 +265,6 @@ if __name__ == "__main__":
     parser.add_argument("--end", type=int, default=-1)
     parser.add_argument("--system_prompt", type=str, default="")
     parser.add_argument("--pre_prompt", type=str, default="")
-    # parser.add_argument("--after_prompt", type=str, default="You FIRST think about the reasoning process as an internal monologue and then provide the final answer.\n The reasoning process MUST BE enclosed within <think> </think> tags. The final answer MUST BE put within <answer> </answer> tags.")
     parser.add_argument("--after_prompt", type=str, default="")
     parser.add_argument("--hdfs", type=int, default=0)
     parser.add_argument("--bz", type=int, default=20)
@@ -297,11 +273,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     
-    print("MME-RealWorld-Lite Inference Script")
+    print("MathVista 数据集评测脚本")
     print("=" * 50)
     print(f"输入文件: {args.input_file}")
     print(f"输出文件: {args.save_name}")
-    print("问题类型: 单选题")
+    print("问题类型: 自动判断（多选题/数值题）")
     
     main(args)
     print("Inference script finished.")
