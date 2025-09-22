@@ -32,52 +32,6 @@ class LocalLLMServer:
         self.model_path = model_path
     
     def get_response(self, user_prompt, decoded_image):
-        """template code:
-        ```python
-        import base64
-from openai import OpenAI
-
-# Set OpenAI's API key and API base to use vLLM's API server.
-openai_api_key = "EMPTY"
-openai_api_base = "http://localhost:9753/v1"
-
-client = OpenAI(
-    api_key=openai_api_key,
-    base_url=openai_api_base,
-)
-
-# 将图像转换为base64
-def encode_image_to_base64(image_path):
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode('utf-8')
-
-image_path = "/home/minyingqian/vprm/MathVista/MathVista_official/data/images/1.jpg"
-base64_image = encode_image_to_base64(image_path)
-
-msg = [
-    {"role": "system", "content": "You are a helpful assistant."},
-    {
-        "role": "user",
-        "content": [
-            {
-                "type": "image_url",
-                "image_url": {  # 这里必须是字典
-                    "url": f"data:image/jpeg;base64,{base64_image}"
-                }
-            },
-            {"type": "text", "text": "What is the text in the illustration?"}
-        ],
-    },
-]
-
-chat_response = client.chat.completions.create(
-    model="/mnt/minyingqian/models/Qwen2.5-VL-3B-Instruct",
-    messages=msg
-)
-print("Chat response:", chat_response)
-print("Chat response text:", chat_response.choices[0].message.content)
-        ```
-        """
         # --- Start of Modified Code ---
         
          # 1. Convert the PIL Image object to a Base64 encoded string
