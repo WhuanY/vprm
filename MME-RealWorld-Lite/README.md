@@ -1,3 +1,4 @@
+# Quick Start
 # 准备局部Bench(MME-RealWorld-Lite)
 ## Step 1 准备数据文件
 ### Step 1.1 下载数据
@@ -102,23 +103,14 @@ python unify_format.py --input_file MME-RealWorld_new.json --output_file MME-Rea
 
 # 推理和评测流程
 ## 推理
-模型在这一步生成推理结果
-```bash
-# export CUDA_VISIBLE_DEVICES="0,1,2,3"
-# export VLLM_WORKER_MULTIPROC_METHOD="spawn"
-# export VLLM_USE_TRITON_FLASH_ATTN=True
-# nohup python inference.py \
-# --model_name_or_path /path/to/your/local/ckpt \
-# --input_file data/MME-RealWorld-Lite_ckpt_version_{}.json \
-# --save_name data/MME-RealWorld-Lite_inferenced_ckpt_version_{}-inst.jsonl \
-# --tp 4 \
-# --bz 1 \
-# --max_new_tokens 8000 2>&1 | tee data/inference_0.log
-# or
-bash inference.sh
+推理脚本支持使用api推理和直接加载VLLM引擎进行推理。如果带`--inference_api`参数则是前者，不带则是后者。
+请确保`model_name_or_path`是待评估的ckpt路径
+```bash 
+bash inference.sh 
 ```
+
 ## 评测
-评测pipeline:对模型回复答案归一化，先判断exact_match是否匹配；如果不匹配，使用gpt4o-mini进行判断.
+更改judge.sh里的输入和输出文件后：
 ```bash 
 bash judge.sh
 ```

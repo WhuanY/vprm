@@ -1,10 +1,5 @@
-export CUDA_VISIBLE_DEVICES="0,1"
-export VLLM_WORKER_MULTIPROC_METHOD="spawn"
-export VLLM_USE_TRITON_FLASH_ATTN=True
-
-nohup python judge.py \
-    --input_file data/MathVision_inferenced_qwen25vl3b-inst.jsonl \
-    --output_file data/MathVision_judge_qwen25vl3b-instresults.jsonl \
-    --tp 2 \
-    --bz 20 \
-    --has_images 1 > judge.log 2>&1 &
+python judge.py \
+    --input_file data/MathVision-test_inferenced_qwen25vl3b-inst.jsonl \
+    --judge_api "https://aigc.x-see.cn/v1" \
+    --api_key "sk-xxxxx" \
+    --output_file data/MathVision-test_inferenced_qwen25vl3b-inst.jsonl > data/judge_qwen2vl7b.log 2>&1 &

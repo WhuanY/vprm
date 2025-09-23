@@ -1,0 +1,1 @@
+python parquet_to_json.py --input_file "data/test-00000-of-00001-3532b8d3f1b4047a.parquet" --output_file "data/MathVision_test.json"

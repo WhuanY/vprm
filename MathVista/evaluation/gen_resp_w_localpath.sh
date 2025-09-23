@@ -2,8 +2,6 @@ export VLLM_WORKER_MULTIPROC_METHOD="spawn"
 export VLLM_USE_TRITON_FLASH_ATTN=True
 export VLLM_TENSOR_PARALLEL_SIZE=2
 
-
-
 python local_generate_response.py \
 --data_file_path /home/minyingqian/vprm/MathVista/data/testmini-00000-of-00001-725687bf7a18d64b.parquet \
 --inference_api http://localhost:9753/v1 \

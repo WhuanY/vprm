@@ -1,12 +1,18 @@
 import json
 from transformers import AutoTokenizer, AutoProcessor
 from qwen_vl_utils import process_vision_info
-import tqdm
+from tqdm import tqdm
 from vllm import LLM, SamplingParams
 from argparse import ArgumentParser
 import os
 from datetime import datetime
 
+from utils import (
+    load_jsonl, 
+    load_json, 
+    encode_image_to_base64, 
+    LocalLLMClient
+)
 
 final_prompt = "Select the best answer to the above multiple-choice question based on the image. \
 Respond with only the letter (A, B, C, D, or E) of the correct option. \nThe best answer is:',"
@@ -99,54 +105,90 @@ def load_dataset(
     
     print(f"Loading {len(raw_dataset)} examples...")
     
-    # 准备数据：为每个数据项添加索引
-    indexed_data = list(enumerate(raw_dataset))
-    
-    # 需要定义 final_prompt，如果没有定义，请添加
-    final_prompt = ""  # 或者从args中获取，如 args.final_prompt
-    
-    # 准备传递给每个进程的参数
-    process_args = [
-        (data_item, processor, modality, system_prompt, pre_prompt, args, final_prompt)
-        for data_item in indexed_data
-    ]
-    
-    # 确定进程数量
-    num_processes = min(cpu_count(), len(raw_dataset), 50)
-    print(f"Using {num_processes} processes for parallel processing...")
-    
-    # 使用多进程处理
-    with Pool(processes=num_processes) as pool:
-        results = list(tqdm.tqdm(
-            pool.imap(_process_single_item_helper, process_args),
-            total=len(process_args),
-            desc="Processing items"
-        ))
-    
-    # 按原始顺序排序结果
-    results.sort(key=lambda x: x[0])
-    
-    # 提取处理后的数据
-    inputs = [result[1] for result in results]
-    
+    for idx, data in enumerate(tqdm(raw_dataset)):
+        # 检查是否存在images字段
+        has_images = "image" in data and data["image"] and args.has_images
+        
+        # 根据record内容自动判断问题类型和选择问题字段
+        is_multiple_choice = False
+        problem_key = "problem_w_choices"  # 默认使用problem
+        
+        if data['problem_w_choices'] != "":
+            is_multiple_choice = True
+            assert data['problem'] == ""
+            problem_key = "problem_w_choices"
+        
+        # 获取原始问题
+        if is_multiple_choice:
+            problem = data["problem_w_choices"]
+        else:
+            problem = data["problem"]
+
+        problem = problem + "\n" + final_prompt
+        
+        if args.pre_prompt:
+            problem = args.pre_prompt + "\n" + problem
+
+        if args.after_prompt:
+            problem = problem + "\n" + args.after_prompt
+
+        if not args.inference_api and args.model_name_or_path:
+            # 但需要添加<image>标记用于多模态处理
+            if '<image>' not in problem and has_images:
+                problem = '<image>\n' + problem
+            
+            # 构建消息内容
+            if has_images:
+                # 处理包含图片的情况
+                text_parts = problem.split("<image>")
+                content = []
+                
+                for i in range(len(data["image"])):
+                    if i < len(text_parts):
+                        if text_parts[i].strip():
+                            content.append({"type": "text", "text": text_parts[i].strip()})
+                    content.append({"type": "image", "image": data["image"][i]})
+                
+                # 添加最后一段文本（如果存在）
+                if len(text_parts) > len(data["image"]) and text_parts[-1].strip():
+                    content.append({"type": "text", "text": text_parts[-1].strip()})
+            else:
+                # 处理纯文本情况
+                content = [{"type": "text", "text": problem}]
+
+            messages = [{"role": "user", "content": content}]
+            if system_prompt:
+                messages.insert(0, {"role": "system", "content": system_prompt})
+            
+            prompt = processor.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+            
+            if has_images:
+                image_data, _ = process_vision_info(messages)
+                inputs.append({"prompt": prompt, "multi_modal_data": {modality: image_data}})
+            else:
+                inputs.append({"prompt": prompt})
+        elif args.inference_api:
+            content = []
+            if has_images:
+                for image_path in data['image']:
+                    base64_uri = encode_image_to_base64(image_path)
+                    if base64_uri:
+                        content.append({"type": "image_url","image_url": {"url": base64_uri}})
+            content.append({ "type": "text","text": problem})
+            messages = [{"role": "user", "content": content}]
+            prompt = processor.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+            if system_prompt:
+                messages.insert(0, {"role": "system", "content": system_prompt})
+            
+            inputs.append({"prompt": prompt, "messages":messages})
+
+        else:
+            raise ValueError("Either model_name_or_path or inference_api should be provided.")
     return inputs
-
-
-def load_jsonl(path):
-    data = []
-    with open(path, "r") as f:
-        for _ in f.readlines():
-            data.append(json.loads(_))
-    return data
-
-
-def load_json(path):
-    """
-    加载json格式的数据文件
-    """
-    with open(path, "r") as f:
-        data = json.load(f)
-    return data
 
 
 def check_generated(args, raw_dataset):
@@ -165,26 +207,10 @@ def check_generated(args, raw_dataset):
     return filtered_data
 
 def main(args):
-    print(f"开始处理MathVista数据集: {args.input_file}")
-    (f"是否包含图片: {bool(args.has_images)}")
-    
-    # 根据文件扩展名选择加载方式
     if args.input_file.endswith('.jsonl'):
         raw_dataset = load_jsonl(args.input_file)[args.start : args.end]
     else:
         raw_dataset = load_json(args.input_file)[args.start : args.end]
-    
-    print(f"成功加载 {len(raw_dataset)} 条原始数据")
-    
-    # 显示数据集样本结构
-    if raw_dataset:
-        print("数据集字段结构:")
-        sample = raw_dataset[0]
-        for key, value in sample.items():
-            if isinstance(value, str) and len(value) > 100:
-                print(f"  {key}: {type(value).__name__} (长度: {len(value)})")
-            else:
-                print(f"  {key}: {value}")
     
     if os.path.exists(args.save_name):
         raw_dataset = check_generated(args, raw_dataset)
@@ -200,19 +226,26 @@ def main(args):
         args,
     )
     
-    llm = LLM(
-        model=args.model_name_or_path,
-        trust_remote_code=True,
-        tensor_parallel_size=args.tp,
-        limit_mm_per_prompt={"image": 10, "video": 2},
-        gpu_memory_utilization=0.9,
-        # enforce_eager=True,
-        # mm_processor_kwargs={
-        #     "min_pixels": 28 * 28,
-        #     "max_pixels": 1024 * 1024,
-        # },
-    )
-
+    if not args.inference_api:
+        llm = LLM(
+            model=args.model_name_or_path,
+            trust_remote_code=True,
+            tensor_parallel_size=args.tp,
+            limit_mm_per_prompt={"image": 10, "video": 2},
+            gpu_memory_utilization=0.9,
+            # enforce_eager=True,
+            # mm_processor_kwargs={
+            #     "min_pixels": 28 * 28,
+            #     "max_pixels": 1024 * 1024,
+            # },
+        )
+    elif args.inference_api:
+        llm = LocalLLMClient(
+            model = args.model_name_or_path,
+            inference_api = args.inference_api,
+        )
+    else:
+        raise ValueError("Either model_name_or_path or inference_api should be provided.")
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_name_or_path, trust_remote_code=True
     )
@@ -231,47 +264,46 @@ def main(args):
     else:
         bz = args.bz
 
-    unfinish_cnt = 0 # 统计未生成完成的样本数量（通常是超过max_new_tokens)
-    for idx in range(0, len(inputs), bz):
+    for idx in tqdm(range(0, len(inputs), bz), 
+                desc="Inferencing", 
+                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed} < {remaining}, {rate_fmt}]"):
         batch_inputs = inputs[idx : idx + bz]
-        outputs = llm.generate(batch_inputs, sampling_params=sampling_params)
-
+        outputs = llm.generate(batch_inputs, sampling_params)
         with open(args.save_name, "a", encoding="utf-8") as f:
             for i in range(len(outputs)):
-                unfinished = False
                 original_idx = idx + i
-
-                # 检查是否因为max_tokens而未完成
-                if any(output.finish_reason == 'length' for output in outputs[i].outputs):
-                    unfinished = True
-                    unfinish_cnt += 1
                 new_dict = {
                     "id": raw_dataset[original_idx]["id"],
                     "problem": raw_dataset[original_idx].get("problem", ""),
                     "problem_w_choices": raw_dataset[original_idx].get("problem_w_choices",""),
                     "answer": raw_dataset[original_idx].get("answer", ""),  
                     "answer_w_choices": raw_dataset[original_idx].get("answer_w_choices", ""),
-                    "response": [
+                    "prompt": inputs[original_idx]["prompt"],
+                }
+                if not args.inference_api and args.model_name_or_path:
+                    new_dict["response"] = [
                         outputs[i].outputs[j].text
                         for j in range(len(outputs[i].outputs))
-                    ],
-                    "prompt": inputs[original_idx]["prompt"],
-                    "unfinished": unfinished
-                }
+                    ]
+                elif args.inference_api:
+                    new_dict["response"] = [
+                        outputs[i].choices[j].message.content
+                        for j in range(len(outputs[i].choices))
+                    ]
+                else:  
+                    raise ValueError("Either model_name_or_path or inference_api should be provided.")
+
                 # 把raw_dataset中的字段加入到new_dict中
                 for key in raw_dataset[original_idx]:
                     if key not in new_dict:
                         new_dict[key] = raw_dataset[original_idx][key]
                 f.write(json.dumps(new_dict, ensure_ascii=False) + "\n")
 
-    print(f"Inference Finished. Saved to:  {args.save_name}")
-
-
 if __name__ == "__main__":
     parser = ArgumentParser(
         description="MathVista evaluation script with Qwen2.5-VL-7B-Instruct"
     )
-    
+    parser.add_argument("--inference_api", type=str, default="")
     parser.add_argument("--model_name_or_path", type=str, 
                     default="/home/minyingqian/models/Qwen2.5-VL-7B-Instruct")
     parser.add_argument("--input_file", type=str, default="MATH-V_testmini.json")
@@ -288,7 +320,6 @@ if __name__ == "__main__":
     parser.add_argument("--end", type=int, default=-1)
     parser.add_argument("--system_prompt", type=str, default="")
     parser.add_argument("--pre_prompt", type=str, default="")
-    # parser.add_argument("--after_prompt", type=str, default="You FIRST think about the reasoning process as an internal monologue and then provide the final answer.\n The reasoning process MUST BE enclosed within <think> </think> tags. The final answer MUST BE put within <answer> </answer> tags.")
     parser.add_argument("--after_prompt", type=str, default="")
     parser.add_argument("--hdfs", type=int, default=0)
     parser.add_argument("--bz", type=int, default=20)
@@ -297,11 +328,5 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     
-    print("MME-RealWorld-Lite Inference Script")
-    print("=" * 50)
-    print(f"输入文件: {args.input_file}")
-    print(f"输出文件: {args.save_name}")
-    print("问题类型: 单选题")
-    
     main(args)
-    print("Inference script finished.")
+    print("Inference script finished. output saved to ", args.save_name)
