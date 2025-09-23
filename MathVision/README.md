@@ -2,79 +2,47 @@
 
 This directory contains the evaluation setup for MathVision benchmark.
 
-## 文件结构
-```
-MathVision/
-├── README.md                    # 本文档
-├── data/                        # 数据目录
-│   ├── MathVision_testmini.json          # 测试数据集
-│   ├── MathVision_inferenced.jsonl      # 推理结果文件
-│   ├── MathVision_judge_results.jsonl   # 评判结果文件
-│   ├── MathVision_judge_results_metrics.json # 评测指标
-│   ├── test-00000-of-00001-*.parquet     # 原始parquet文件
-│   └── testmini-00000-of-00001-*.parquet # 原始parquet文件
-├── images/                      # 图片文件夹 (需要从官方下载)
-│   ├── 1.jpg
-│   ├── 2.jpg
-│   └── ...
-├── parquet_to_json.py           # 数据格式转换脚本
-├── inference.py                 # 推理脚本
-├── inference.sh                 # 推理执行脚本
-├── judge.py                     # 评判脚本
-├── judge.sh                     # 评判执行脚本
-├── judge.log                    # 评判日志
-├── see_neg.py                   # 查看负样本脚本
-└── see_pos.py                   # 查看正样本脚本
-```
 
 ## QuickStart
 
-### Step 1: 准备 images.zip
+### Step 1: 数据准备
+
 从 MathVision 官方仓库或对应的 benchmark 源下载图片数据包：
 ```bash
 cd vprm # 根目录
-cd MathVision
-wget ..../images.zip # 从官方提供的路径下载图片包
-```
+cd MathVision # bench目录
 
-### Step 2: 解压图片文件
-```bash
-cd MathVision
+# 从官方提供的路径下载图片包
+wget https://huggingface.co/datasets/MathLLMs/MathVision/resolve/main/images.zip 
 unzip images.zip
+ls images/ | wc -l # 检查图片数量，这一步应该输出3040
+mkdir -p data
+cd data
+wget https://huggingface.co/datasets/MathLLMs/MathVision/resolve/main/data/test-00000-of-00001-3532b8d3f1b4047a.parquet
+wget https://huggingface.co/datasets/MathLLMs/MathVision/resolve/main/data/test-00000-of-00001-3532b8d3f1b4047a.parquet
+cd .. # 返回上层目录
 ```
 
 解压后应该看到 `images/` 目录包含所有测试图片。
 
-### Step 3: 验证数据完整性
-```bash
-# 检查图片数量
-ls images/ | wc -l
-```
+### Step 2: 格式转换
+参考脚本`parquet_to_json.sh`
 
-### Step 4: 原始数据转换 
-⚠️在跑这个文件之前，
-```bash
-python parquet_to_json.py # 这个脚本将原始数据集统一换成json
-```
-
-
-### Step 5: 推理
+### Step 3: 推理
+推理脚本支持使用api推理和直接加载VLLM引擎进行推理。如果带`inference_api`参数则是前者，不带则是后者。
+请确保`model_name_or_path`是待评估的ckpt路径
 ```bash 
 bash inference.sh 
 ```
-记得修改里面的输入文件和输出文件。
 
-
-### Step 6: 算分数
-```bash 
-bash judge.sh
+### Step 4: 算分数
+算分数的流程最小化复现了官方的整个流程。官方的评测是基于复杂的规则复现的。
+```sh
+# 首先，把这个链接对应的文件https://github.com/mathllm/MATH-V/blob/main/data/test.jsonl放到data目录下
+judge_official.sh # 使用官方的脚本进行评测。在judge_official.sh目录中更改要评估的推理文件。
 ```
 
-## 数据说明
-- `MathVision_testmini.json`: 包含测试样本，每个样本包含问题、答案和对应的图片路径。这个json从parquet转换而来
-- `images/`: 存放所有测试图片，文件名对应 JSON 中的图片 ID
+# Evaluation Result (Run Locally)
+[本地测试] MathVista 子集 qwen25vl3b 21.9
+[官方结果] Official  全集 qwen25vl3b 21.2 
 
-## 注意事项
-1. 图片文件较大，已在 `.gitignore` 中忽略，需要手动下载
-2. 确保图片路径与 JSON 文件中的路径对应
-3. inference流程首先会去*_inference.jsonl文件里找已经推理过的id并且排除掉。

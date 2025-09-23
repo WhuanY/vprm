@@ -1,23 +1,20 @@
 import pandas as pd
-
-
-# read parquet file
-path = "data/test-00000-of-00001-3532b8d3f1b4047a.parquet"
-
-df = pd.read_parquet(path)
+import json
+import argparse
+from tqdm import tqdm
 
 def convert_options(options: list) -> str:
     """
     convert options list to string like "A. xxx B. xxx C. xxx D. xxx"
     """
+    assert len(options) == 5, options
     _ = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    option_str = ' '.join([f"{_i}. {opt}" for _i, opt in zip(_, options)])
-    print(option_str)
+    option_str = '\n'.join([f"({_i}) {opt}" for _i, opt in zip(_, options)])
     return option_str
 
 def single_record(record:dict):
-    record.pop("decoded_image")
-    print(record)
+    record.pop("decoded_image", None)  # Use None as default to avoid KeyError if key doesn't exist
+    # print(record)
     converted_template = {
             "id":"",
             "problem": "",
@@ -33,7 +30,6 @@ def single_record(record:dict):
     options = list(record['options'])
     if options and len(options) > 1: # 如果是多选题
         converted_template['problem_w_choices'] = problem + "\n" + convert_options(options)
-        
         converted_template['answer_w_choices'] = record['answer']
     else: #如果不是多选题
         converted_template['problem'] = problem
@@ -46,22 +42,31 @@ def single_record(record:dict):
 
     return converted_template
 
-processed_lsts = [row.to_dict() for i, row in df.iterrows()]
-print(f"Total {len(processed_lsts)} records to process.")
-from tqdm import tqdm
+def main():
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Convert Parquet file to JSON for MathVision dataset")
+    parser.add_argument("--input_file", type=str, required=True, help="Path to input Parquet file")
+    parser.add_argument("--output_file", type=str, required=True, help="Path to output JSON file")
+    
+    args = parser.parse_args()
+    
+    # Read parquet file
+    print(f"Reading parquet file from: {args.input_file}")
+    df = pd.read_parquet(args.input_file)
+    
+    processed_lsts = [row.to_dict() for i, row in df.iterrows()]
+    print(f"Total {len(processed_lsts)} records to process.")
+    
+    results = []
+    for lst in tqdm(processed_lsts, desc="Processing records"):
+        results.append(single_record(lst))
+    
+    # Save results to JSON file
+    print(f'------- Saving results to JSON file: {args.output_file} -------')
+    with open(args.output_file, 'w', encoding='utf-8') as f:
+        json.dump(results, f, ensure_ascii=False, indent=4)
+    
+    print(f"Conversion completed. {len(results)} records saved to {args.output_file}")
 
-results = []
-for lst in processed_lsts:
-    results.append(single_record(lst))
-
-
-# Save results to jsonl file
-import json
-print('------- Saving results to JSON file -------')
-output_json = "MathVision_test.json"
-# save results to json file
-with open(output_json, 'w', encoding='utf-8') as f:
-    json.dump(results, f, ensure_ascii=False, indent=4)
-# with open(output_jsonl, 'w', encoding='utf-8') as f:
-#     for item in results:
-#         f.write(json.dumps(item) + '\n')
+if __name__ == "__main__":
+    main()
