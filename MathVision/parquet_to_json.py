@@ -7,14 +7,14 @@ def convert_options(options: list) -> str:
     """
     convert options list to string like "A. xxx B. xxx C. xxx D. xxx"
     """
+    assert len(options) == 5, options
     _ = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    option_str = ' '.join([f"{_i}. {opt}" for _i, opt in zip(_, options)])
-    print(option_str)
+    option_str = '\n'.join([f"({_i}) {opt}" for _i, opt in zip(_, options)])
     return option_str
 
 def single_record(record:dict):
     record.pop("decoded_image", None)  # Use None as default to avoid KeyError if key doesn't exist
-    print(record)
+    # print(record)
     converted_template = {
             "id":"",
             "problem": "",
@@ -30,7 +30,6 @@ def single_record(record:dict):
     options = list(record['options'])
     if options and len(options) > 1: # 如果是多选题
         converted_template['problem_w_choices'] = problem + "\n" + convert_options(options)
-        
         converted_template['answer_w_choices'] = record['answer']
     else: #如果不是多选题
         converted_template['problem'] = problem

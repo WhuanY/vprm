@@ -1,3 +1,4 @@
+# Quick Start
 # 准备局部Bench(MME-RealWorld-Lite)
 ## Step 1 准备数据文件
 ### Step 1.1 下载数据
@@ -111,14 +112,14 @@ python unify_format.py --input_file MME-RealWorld_new.json --output_file MME-Rea
 
 # 推理和评测流程
 ## 推理
-模型在这一步生成推理结果
-
-```bash
-bash inference.sh
+推理脚本支持使用api推理和直接加载VLLM引擎进行推理。如果带`--inference_api`参数则是前者，不带则是后者。
+请确保`model_name_or_path`是待评估的ckpt路径
+```bash 
+bash inference.sh 
 ```
+
 ## 评测
-记得修改里面的输入文件和输出文件。
-因为MME-RealWorld似乎都是多选题，所以这里暂时没有上LLM来judge.
+更改judge.sh里的输入和输出文件后：
 ```bash 
 bash judge.sh
 ```

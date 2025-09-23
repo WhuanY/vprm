@@ -4,9 +4,10 @@ export VLLM_USE_TRITON_FLASH_ATTN=True
 
 
 nohup python inference.py \
+--inference_api "http://localhost:9753/v1" \
 --model_name_or_path /mnt/minyingqian/models/Qwen2-VL-7B-Instruct \
 --input_file data/MME-RealWorld-Lite_unified.json \
---save_name data/MME-RealWorld-Lite_inferenced_qwen2vl7b-inst.jsonl \
+--save_name data/MME-RealWorld-Lite_inferenced_qwen2vl7b-inst_api.jsonl \
 --tp 4 \
 --bz 1 \
 --max_new_tokens 8000 2>&1 | tee data/inference_0.log
