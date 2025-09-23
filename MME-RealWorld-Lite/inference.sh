@@ -4,8 +4,7 @@ export VLLM_USE_TRITON_FLASH_ATTN=True
 
 
 nohup python inference.py \
---inference_api "http://localhost:9753/v1" \
---model_name_or_path /mnt/minyingqian/models/Qwen2-VL-7B-Instruct \
+--model_name_or_path /path/to/your/local_ckpt \
 --input_file data/MME-RealWorld-Lite_unified.json \
 --save_name data/MME-RealWorld-Lite_inferenced_qwen2vl7b-inst_api.jsonl \
 --tp 4 \

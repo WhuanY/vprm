@@ -16,7 +16,7 @@ def save_image_from_bytes(image_bytes, filename):
     try:
         # 检查是否为WEBP格式并调整文件名
         if image_bytes.startswith(b'RIFF') and b'WEBP' in image_bytes[:12]:
-            print(f"Detected WEBP format for {filename}")
+            #print(f"Detected WEBP format for {filename}")
             filename = filename.replace('.jpg', '.webp')
         elif image_bytes.startswith(b'\xFF\xD8\xFF'):
             # JPEG格式
@@ -33,7 +33,7 @@ def save_image_from_bytes(image_bytes, filename):
         with open(image_path, 'wb') as f:
             f.write(image_bytes)
         
-        print(f"Successfully saved {filename} ({len(image_bytes)} bytes)")
+        #print(f"Successfully saved {filename} ({len(image_bytes)} bytes)")
         return image_path
         
     except Exception as e:
@@ -91,8 +91,8 @@ def single_record(record: dict, index: int):
 
 def main():
     parser = argparse.ArgumentParser(description='Convert RealWorldQA parquet file to JSON format')
-    parser.add_argument('--input_file', type=str, required=True, 
-                       help='Path to input parquet file')
+    parser.add_argument('--input_files', type=str, required=True, 
+                       help='Space-separated list of input parquet files')
     parser.add_argument('--output_file', type=str, required=True,
                        help='Path to output JSON file')
     parser.add_argument('--sample_ratio', type=float, default=1.0,
@@ -105,45 +105,64 @@ def main():
         print(f"Error: sample_ratio must be between 0.0 and 1.0, got {args.sample_ratio}")
         return
     
-    # Check if input file exists
-    if not os.path.exists(args.input_file):
-        print(f"Error: Input file {args.input_file} does not exist!")
+    # Parse input files
+    input_files = args.input_files.split()
+    
+    # Check if input files exist
+    valid_files = []
+    for file_path in input_files:
+        if not os.path.exists(file_path):
+            print(f"Error: Input file {file_path} does not exist! Skipping.")
+        else:
+            valid_files.append(file_path)
+    
+    if not valid_files:
+        print("Error: No valid input files found!")
         return
     
-    print(f"Reading parquet file: {args.input_file}")
-    df = pd.read_parquet(args.input_file)
-    print(f"Original dataset size: {len(df)}")
+    # Process each parquet file and combine results
+    all_results = []
+    total_index = 0
     
-    # Sample data if sample_ratio < 1.0
-    if args.sample_ratio < 1.0:
-        sample_size = int(len(df) * args.sample_ratio)
-        print(f"Sampling {sample_size} records (ratio: {args.sample_ratio})")
+    for file_path in valid_files:
+        print(f"\nProcessing parquet file: {file_path}")
+        df = pd.read_parquet(file_path)
+        print(f"File size: {len(df)} records")
         
-        # Set random seed for reproducibility
-        random.seed(42)
-        np.random.seed(42)
+        # Sample data if sample_ratio < 1.0
+        if args.sample_ratio < 1.0:
+            sample_size = int(len(df) * args.sample_ratio)
+            print(f"Sampling {sample_size} records (ratio: {args.sample_ratio})")
+            
+            # Set random seed for reproducibility
+            random.seed(42 + valid_files.index(file_path))  # Different seed for each file
+            np.random.seed(42 + valid_files.index(file_path))
+            
+            # Random sampling
+            df = df.sample(n=sample_size, random_state=42 + valid_files.index(file_path)).reset_index(drop=True)
+            print(f"Sampled dataset size: {len(df)}")
         
-        # Random sampling
-        df = df.sample(n=sample_size, random_state=42).reset_index(drop=True)
-        print(f"Sampled dataset size: {len(df)}")
+        # Convert dataframe to list of dictionaries
+        processed_lsts = [row.to_dict() for i, row in df.iterrows()]
+        print(f"Processing {len(processed_lsts)} records...")
+
+        # Process records using single thread with continuous ID assignment
+        file_results = []
+        for record in tqdm(processed_lsts, desc=f"Processing {os.path.basename(file_path)}"):
+            result = single_record(record, total_index)
+            file_results.append(result)
+            total_index += 1  # Increment global index counter
+        
+        all_results.extend(file_results)
+        print(f"Finished processing {file_path}. Total records so far: {len(all_results)}")
     
-    # Convert dataframe to list of dictionaries
-    processed_lsts = [row.to_dict() for i, row in df.iterrows()]
-    print(f"Total {len(processed_lsts)} records to process.")
-
-    # Process records using single thread with manual ID assignment
-    results = []
-    for index, record in enumerate(tqdm(processed_lsts, desc="Processing records")):
-        result = single_record(record, index)
-        results.append(result)
-
-    # Save results to JSON file
-    print(f'Saving results to JSON file: {args.output_file}')
+    # Save combined results to JSON file
+    print(f'\nSaving combined results to JSON file: {args.output_file}')
     with open(args.output_file, 'w', encoding='utf-8') as f:
-        json.dump(results, f, ensure_ascii=False, indent=4)
+        json.dump(all_results, f, ensure_ascii=False, indent=4)
     
     print(f"Conversion completed! Output saved to {args.output_file}")
-    print(f"Final output contains {len(results)} records")
+    print(f"Final output contains {len(all_results)} records from {len(valid_files)} files")
 
 
 if __name__ == "__main__":

@@ -1,48 +1,99 @@
 import re
 import json
+import os
 from argparse import ArgumentParser
 from collections import defaultdict
+import openai
+import time
 
 def extract_answer_from_response(response):
     """
-    提取response中最后一个<answer>标签的内容
-    对于单选题和多选题都适用
+    从response中提取单个字母答案
+    如果strip后只剩单个字母(A-E)，则返回该字母
+    如果找不到明确答案，返回None
     """
-    ans_pattern = ["(A)", "(B)", "(C)", "(D)", "(E)"]
-    ans = ""
     if not response:
         return None
     
-    # 检查是否包含unfinished标记
-    if "unfinished" in response.lower():
-        return None
+    # 清理响应文本
+    cleaned_response = response.replace("(", "").replace(")", "").strip()
     
-    # 使用正则表达式找到所有<answer></answer>标签
-    answer_matches = re.findall(r'<answer>(.*?)</answer>', response, re.DOTALL)
+    # 检查是否只有一个字符且是A-E
+    if len(cleaned_response) == 1 and cleaned_response.upper() in "ABCDE":
+        return cleaned_response.upper()
     
-    if answer_matches:
-        # 返回最后一个匹配的内容，去除首尾空白
-        last_answer = answer_matches[-1].strip()
-        ans = last_answer if last_answer else "No <answer> tag found"
-    else:
-        ans = "No <answer> tag found"
+    # 如果没有找到明确答案，则返回None
+    return None
+
+
+def judge_with_gpt4o(response, golden_ans, question, id_field, client):
+    """
+    使用GPT-4o-mini判断模型答案是否正确
+    """
+    # 设置OpenAI API密钥
+    openai.api_key = args.api_key
+
+    if not openai.api_key:
+        print(f"警告: 未找到OpenAI API密钥，无法使用GPT-4o-mini判断问题 {id_field}")
+        return 0  # 默认为错误
     
-    if ans == "No <answer> tag found":
+    try:
+        # 构建提示
+        prompt = f"""Judge whether the model's answer to the multiple-choice question is correct.
+
+question_id {id_field}
+
+question: {question}
+
+gloden answer:{golden_ans}
+
+model response: 
+{response}
+
+Please judge and response strictly, respond with only 0 or 1, where 1 means the model response aligns with gloden answer, and 0 means it is not aligned."""
         
-        print(f"Warning: {ans} in response: {response}")
-        # 尝试从response中提取选项，如果extracted_answer中包含**单一**选项，则返回该选项
-        # 防止模型输出多个选项仍然判断正确，
-        extracted_options = [opt for opt in ans_pattern if opt in response]
-        if len(extracted_options) == 1:
-            ans = extracted_options[0]
-            # mapping: (A) -> A, (B) -> B, ...
-            ans = ans.replace("(", "").replace(")", "")
-            print("Warning: Extracted single option from response:", ans)
-            assert ans in ["A", "B", "C", "D", "E"]
+        # 调用OpenAI API
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are an expert judge. Respond with only 0 or 1."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=5,
+            temperature=0
+        )
+        
+        # 提取结果
+        result = completion.choices[0].message.content.strip()
+        
+        # 标准化结果
+        if "1" in result:
+            return 1
         else:
-            ans = "No <answer> tag found"
-       
-    return ans
+            return 0
+            
+    except Exception as e:
+        print(f"GPT-4o调用错误 ({id_field}): {e}")
+        time.sleep(2)  # 遇到错误等待一下再重试
+        try:
+            # 简化提示再试一次
+            completion = openai.ChatCompletion.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "判断答案是否正确。只回复0或1。"},
+                    {"role": "user", "content": f"标准答案: {golden_ans}\n模型答案: {response}\n正确输出1，错误输出0:"}
+                ],
+                max_tokens=5,
+                temperature=0
+            )
+            result = completion.choices[0].message.content.strip()
+            if "1" in result:
+                return 1
+            else:
+                return 0
+        except:
+            print("[WARNING] GPT-4o-mini重试失败，默认为错误")
+            return 0  # 重试失败，默认为错误
 
 
 def extract_subcategory(id_field):
@@ -54,6 +105,7 @@ def extract_subcategory(id_field):
     parts = id_field.split('/')
     if len(parts) >= 2:
         return f"{parts[0]}/{parts[1]}"
+    print("[WARNING] ID格式异常，无法提取子类别:", id_field)
     return "unknown"
 
 
@@ -66,6 +118,7 @@ def extract_method(id_field):
     parts = id_field.split('/')
     if len(parts) >= 1:
         return parts[0].lower()  # 转换为小写以保持一致性
+    print("[WARNING] ID格式异常，无法提取方法:", id_field)
     return "unknown"
 
 
@@ -79,7 +132,7 @@ def calculate_weighted_average(subcategory_results, total_questions):
     
     weighted_sum = 0.0
     for subcategory, stats in subcategory_results.items():
-        weight = stats['total'] / total_questions  # 修改：使用 'total' 而不是 'total_questions'
+        weight = stats['total'] / total_questions
         weighted_sum += stats['accuracy'] * weight
     
     return weighted_sum
@@ -96,9 +149,12 @@ def calculate_unweighted_average(subcategory_results):
     total_accuracy = sum(stats['accuracy'] for stats in subcategory_results.values())
     return total_accuracy / len(subcategory_results)
 
+
 def main(args):
     """
-    MMERealWorld-Lite全部都是多选题，所以只对模糊选项使用LLM做判断
+    MMERealWorld-Lite评测流程
+    1. 尝试从响应中提取答案
+    2. 如果提取成功，直接比较；否则使用GPT-4o-mini判断
     """
     input_file = args.input_file
     
@@ -119,21 +175,36 @@ def main(args):
     with open(input_file, 'r', encoding='utf-8') as f:
         for line in f:
             d = json.loads(line)
-            response = d.get('response', '')[0] # 取第一个response
-            gen_answer = extract_answer_from_response(response)
+            response = d.get('response', '')[0]  # 取第一个response
             golden_ans = d.get('answer_w_choices', '')
+            question = d.get('problem_w_choices', '')
+            id_field = d.get('id', '')
             
             # 提取子类别和方法
-            subcategory = extract_subcategory(d.get('id', ''))
-            method = extract_method(d.get('id', ''))
+            subcategory = extract_subcategory(id_field)
+            method = extract_method(id_field)
             
             subcategory_questions[subcategory] += 1
             
-            print(f"ID: {d.get('id', '')}, Method: {method}, Subcategory: {subcategory}")
-            print(f"Generated Answer: {gen_answer}, Golden Answer: {golden_ans}")
+            print(f"ID: {id_field}, Method: {method}, Subcategory: {subcategory}")
             
-            is_correct = gen_answer == golden_ans
+            # 步骤1：尝试提取答案
+            gen_answer = extract_answer_from_response(response)
             
+            # 判断逻辑
+            is_correct = False
+            if gen_answer is not None:
+                # 直接比较答案
+                print(f"直接提取答案: {gen_answer}, 标准答案: {golden_ans}")
+                is_correct = gen_answer == golden_ans
+            else:
+                # 使用GPT-4o-mini判断
+                print(f"无法直接提取答案，使用GPT-4o-mini判断...")
+                judge_result = judge_with_gpt4o(response, golden_ans, question, id_field)
+                is_correct = judge_result == 1
+                print(f"GPT-4o-mini判断结果: {'正确' if is_correct else '错误'}")
+            
+            # 更新统计数据
             if is_correct:
                 total_correct += 1
                 subcategory_stats[subcategory]['correct'] += 1
@@ -220,7 +291,7 @@ def main(args):
             'accuracy': stats['accuracy']
         }
     
-    # 按准确率排序子类别（可选）
+    # 按准确率排序子类别
     sorted_subcategories = sorted(
         detailed_metrics['subcategory_results'].items(),
         key=lambda x: x[1]['accuracy'],
@@ -257,17 +328,29 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser(description="Judge evaluation script for MathVision inference results")
+    parser = ArgumentParser(description="Judge evaluation script for MME-RealWorld-Lite")
     parser.add_argument(
         "--input_file",
         type=str,
-        default="MathVision_judge_results.jsonl",
+        default="data/MME-RealWorld-Lite_inferenced_model.jsonl",
         help="Path to the JSONL file containing inference results",
     )
     parser.add_argument(
         "--output_file",
         type=str,
-        default="MMEE-RealWorld-Lite_judge_results.jsonl"
+        default="data/MME-RealWorld-Lite_judge_results.jsonl"
+    )
+    parser.add_argument(
+        "--judge_api",
+        type=str,
+        default="https://aigc.x-see.cn/v1",
+        help="API endpoint for judgment (not used in current implementation)",
+    )
+    parser.add_argument(
+        "--api_key",
+        type=str,
+        default="sk-xxxxxx",
+        help="API key for the judgment API (not used in current implementation)",
     )
     args = parser.parse_args()
     main(args)

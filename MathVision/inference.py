@@ -233,7 +233,7 @@ if __name__ == "__main__":
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--end", type=int, default=-1)
     parser.add_argument("--system_prompt", type=str, default="")
-    parser.add_argument("--pre_prompt", type=str, default="")
+    parser.add_argument("--pre_prompt", type=str, default='Please solve the problem step by step and put your answer in one "\\boxed{}". If it is a multiple choice question, only one letter is allowed in the "\\boxed{}".')
     parser.add_argument("--after_prompt", type=str, default="")
     parser.add_argument("--hdfs", type=int, default=0)
     parser.add_argument("--bz", type=int, default=20)

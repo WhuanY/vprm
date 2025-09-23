@@ -5,6 +5,21 @@ import tqdm
 from argparse import ArgumentParser
 
 
+def extract_answer_from_response(response: str) -> str:
+    """
+    从模型回答中提取最终答案，假设答案在最后一个\boxed{}中
+    """
+    import re
+    # 使用正则表达式查找所有\boxed{...}模式
+    matches = re.findall(r'\\boxed\{(.*?)\}', response)
+    if matches:
+        # 返回最后一个匹配的内容作为答案
+        return matches[-1].strip()
+    else:
+        # 如果没有找到，返回整个响应的简化版本
+        return response.strip().split('\n')[-1].strip()
+
+
 def judge_with_gpt4o(response, golden_ans, question, id_field, client):
     """
     使用GPT-4o-mini判断模型答案是否正确
@@ -108,12 +123,10 @@ def run_judge_evaluation(inference_data, client, args):
         
         # Get model response (first element if it's a list)
         model_response = data.get('response', [''])[0] if isinstance(data.get('response'), list) else data.get('response', '')
-        
         # Get ID
         id_field = data.get('id', 'unknown')
         
         # Judge with GPT-4o-mini
-        
         # first we try exact match
         normalized_model_resp = model_response.strip().lower()
         normalized_std_answer = standard_answer.strip().lower()

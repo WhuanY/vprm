@@ -11,22 +11,13 @@ unzip data.zip
 ```
 
 ## Step 2 json文件转换
-这一步把本地存储好的数据换成通用的推理格式
-### Step 2.1 把image字段换成列表
-⚠️因为原始数据庞大，MME只在Lite集合上做过测试，Lite集合的处理首先处理了image字段，保证其能够打开。
 ```bash
-# 确保已经确认全局Bench数据的image的路径，然后按照实际情况调整这个py脚本中的三个目录
-# NEW_DIR=存储图片的根目录
-# ORIGINAL_JSON="MME_RealWorld_Lite.json"  # 可以改
-# OUTPUT_JSON="MME-RealWorld_Lite_new.json" # 可以改
-python preprocess_image.py
-```
-❓判断图片路径有没有对上？打开`MME-RealWorld_Lite_new.json`，看看文件中的img路径能不能打开。
-
-### Step 2.2 统一推理json格式
-⚠️如下是示例，建议改成绝对路径，存储在你预期的目录下.
-```bash
-python unify_format.py --input_file MME-RealWorld_new.json --output_file MME-RealWorld_unified.json
+# # python unify_format_lite.py \
+# --input_file data/MME-RealWorld-Lite.json \
+# --output_file data/MME-RealWorld-Lite_unified.json \
+# --image_base_dir "/mnt/minyingqian/MME-RealWorld-Lite-data/data/imgs" > data/unifyfmt.log 2>&1 & 
+# or
+bash unify_format_lite.sh # 针对MME-RealWorld-Lite数据集
 ```
 
 ## Step 3 推理和评测
@@ -123,3 +114,32 @@ bash inference.sh
 ```bash 
 bash judge.sh
 ```
+
+# Evaluation Result (Run Locally)
+Official evaluation result for qwen2-vl-7b:
+![Evaluation Result](https://cdn-uploads.huggingface.co/production/uploads/623d8ca4c29adf5ef6175615/p-aHTLQjBach39Rz9CyR2.png)
+Locally run evaluation result for qwen2vl7b
+```txt
+=== Overall Results ===
+Total Questions: 1918
+Correct: 916
+Wrong: 1002
+Overall Accuracy: 0.4776
+
+=== Method Results ===
+perception: 582/1168 = 0.4983 (Avg: 0.4983, Avg-C: 0.5482)
+reason: 69/150 = 0.4600 (Avg: 0.4600, Avg-C: 0.4600)
+reasoning: 265/600 = 0.4417 (Avg: 0.4417, Avg-C: 0.5183)
+
+=== Subcategory Results ===
+perception/ocr_cc: 216/249 = 0.8675
+perception/diagram_and_table: 77/100 = 0.7700
+reasoning/ocr_cc: 71/100 = 0.7100
+reasoning/diagram_and_table: 48/100 = 0.4800
+reason/monitoring: 69/150 = 0.4600
+perception/remote_sensing: 67/150 = 0.4467
+Perception/Autonomous_Driving: 140/350 = 0.4000
+Reasoning/Autonomous_Driving: 146/400 = 0.3650
+perception/monitoring: 82/319 = 0.2571
+```
+
