@@ -1,7 +1,25 @@
 # MathVision Evaluation
-
 This directory contains the evaluation setup for MathVision benchmark.
-
+必备文件如下图：
+```
+MathVision/
+├─ data/
+│  ├─ test.jsonl
+│  ├─ test-00000-.....parquet
+│  ├─ testmini-..parquet
+├─ evaluation/
+│  ├─ evaluate.py
+│  ├─ utils.py
+├─ images/
+│  ├─ ...
+│  ├─ 3040.jpg
+├─ inference.py
+├─ inference.sh
+├─ parquet_to_json.py
+├─ parquet_to_json.sh
+├─ README.md
+├─ utils.py
+```
 
 ## QuickStart
 
@@ -39,10 +57,10 @@ bash inference.sh
 算分数的流程最小化复现了官方的整个流程。官方的评测是基于复杂的规则复现的。
 ```sh
 # 首先，把这个链接对应的文件https://github.com/mathllm/MATH-V/blob/main/data/test.jsonl放到data目录下
+cd MathVision
 judge_official.sh # 使用官方的脚本进行评测。在judge_official.sh目录中更改要评估的推理文件。
 ```
 
 # Evaluation Result (Run Locally)
-[本地测试] MathVista 子集 qwen25vl3b 21.9
-[官方结果] Official  全集 qwen25vl3b 21.2 
-
+[本地测试] MathVista 2920/3040 qwen25vl3b 23.4
+[官方结果] Official  3040/3040 qwen25vl3b 21.2 

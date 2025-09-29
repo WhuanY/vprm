@@ -2,10 +2,17 @@ import os
 import base64
 import json
 import traceback
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from logging import getLogger
 
 from openai import OpenAI
+import logging
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = getLogger(__name__)
 
 def load_jsonl(path):
     data = []
@@ -71,6 +78,7 @@ class LocalLLMClient:
         self.inference_api = inference_api
 
     def _generate_single(self, single_input, sampling_params):
+        logger.info("[_generate_single] single_input: {}, sampling_params: {}".format(single_input, sampling_params))
         chat_response = self.client.chat.completions.create(
             model=self.model,
             messages=single_input,
@@ -81,19 +89,16 @@ class LocalLLMClient:
 
     def generate(self, batch_inputs, sampling_params):
         outputs = []
-        with ThreadPoolExecutor(max_workers=32) as executor:
-            future_to_index = {
-                executor.submit(self._generate_single, msg['messages'], sampling_params): i
-                for i, msg in enumerate(batch_inputs)
-            }
-            for future in as_completed(future_to_index):
-                index = future_to_index[future]
-                try:
-                    response = future.result()
-                    outputs.append(response)
-                except Exception as e:
-                    print(f"Request for input {index} generated an exception: {e}")
-                    traceback.print_exc()
-                    assert False, "Error in API request"
+        logger.info(f"[generate] batch size: {len(batch_inputs)}, sampling_params: {sampling_params}")
+        for index, msg in enumerate(batch_inputs):
+            try:
+                logger.info(f"[generate] Processing input index: {index}")
+                response = self._generate_single(msg['messages'], sampling_params)
+                outputs.append(response)
+                logger.info(f"[generate] Completed input index: {index}")
+            except Exception as e:
+                print(f"Request for input {index} generated an exception: {e}")
+                traceback.print_exc()
+                assert False, "Error in API request"
         return outputs
     

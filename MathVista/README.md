@@ -39,8 +39,7 @@ python local_generate_response.py \
 --output_dir ../results/local_ckpt-version-xxx \
 --output_file output_ckpt_version-xxx.json
 ```
-where the `--data_file_path` should be the original parquet file from official repo for evaluation.
-
+where the `--data_file_path` should be the original parquet file from official repo for evaluation. Download via link: https://huggingface.co/datasets/AI4Math/MathVista/resolve/main/data/testmini-00000-of-00001-725687bf7a18d64b.parquet
 ### Step 2 Extract Answer
 Extract the short answer text for score calculation on the **testmini** subset:
 

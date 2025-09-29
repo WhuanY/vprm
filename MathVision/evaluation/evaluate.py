@@ -1,3 +1,4 @@
+import argparse
 import re
 from tqdm import tqdm
 import time
@@ -85,8 +86,30 @@ def math_level_subject_acc(answer_file):
 
 
 if __name__ == '__main__':
-    for root, dirs, files in os.walk('./outputs/'):
-        for file in files:
-            if file.endswith('.jsonl'):
-                evaluate(os.path.join(root, file), True)
-                math_level_subject_acc(os.path.join(root, file))
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--eval_file', type=str, default=None, help='The name of the file to evaluate in the outputs directory.')
+    args = parser.parse_args()
+
+    output_dir = './outputs/'
+
+    if args.eval_file:
+        file_path = os.path.join(output_dir, args.eval_file)
+        if os.path.exists(file_path):
+            print(f"Evaluating single file: {file_path}")
+            evaluate(file_path, True)
+            math_level_subject_acc(file_path)
+        else:
+            print(f"Error: File not found at {file_path}")
+    else:
+        print("Evaluating all .jsonl files in the outputs directory...")
+        for root, dirs, files in os.walk(output_dir):
+            for file in files:
+                if file.endswith('.jsonl'):
+                    file_path = os.path.join(root, file)
+                    evaluate(file_path, True)
+                    math_level_subject_acc(file_path)
+    # for root, dirs, files in os.walk('./outputs/'):
+    #     for file in files:
+    #         if file.endswith('.jsonl'):
+    #             evaluate(os.path.join(root, file), True)
+    #             math_level_subject_acc(os.path.join(root, file))

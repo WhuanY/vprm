@@ -128,7 +128,7 @@ def run_judge_evaluation(inference_data, client, args):
         
         # Judge with GPT-4o-mini
         # first we try exact match
-        normalized_model_resp = model_response.strip().lower()
+        normalized_model_resp = extract_answer_from_response(model_response).strip().lower()
         normalized_std_answer = standard_answer.strip().lower()
         if normalized_model_resp == normalized_std_answer:
             print(f"idx: {idx} exact match. {normalized_model_resp=}, {normalized_std_answer=}")

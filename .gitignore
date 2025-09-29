@@ -1,3 +1,6 @@
+*.pyc
+
+
 # Ignore all files in any images directory (but keep the directory structure)
 **/images/*
 
@@ -37,5 +40,13 @@ test/
 
 tmp/**
 
+__pycache__/
+results/
+outputs/
+
+
 # not ignore these files
 !MME-RealWorld-Lite/data/unzip_file.sh
+!MathVision/data/test.jsonl
+
+

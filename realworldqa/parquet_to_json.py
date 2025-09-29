@@ -40,7 +40,6 @@ def save_image_from_bytes(image_bytes, filename):
         print(f"Error saving image {filename}: {e}")
         return None
         
-        return None
 
 def single_record(record: dict, index: int):
     """

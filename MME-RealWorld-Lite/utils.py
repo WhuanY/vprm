@@ -81,19 +81,12 @@ class LocalLLMClient:
 
     def generate(self, batch_inputs, sampling_params):
         outputs = []
-        with ThreadPoolExecutor(max_workers=32) as executor:
-            future_to_index = {
-                executor.submit(self._generate_single, msg['messages'], sampling_params): i
-                for i, msg in enumerate(batch_inputs)
-            }
-            for future in as_completed(future_to_index):
-                index = future_to_index[future]
-                try:
-                    response = future.result()
-                    outputs.append(response)
-                except Exception as e:
-                    print(f"Request for input {index} generated an exception: {e}")
-                    traceback.print_exc()
-                    assert False, "Error in API request"
+        for index, msg in enumerate(batch_inputs):
+            try:
+                response = self._generate_single(msg['messages'], sampling_params)
+                outputs.append(response)
+            except Exception as e:
+                print(f"Request for input {index} generated an exception: {e}")
+                traceback.print_exc()
+                assert False, "Error in API request"
         return outputs
-    

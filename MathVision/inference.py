@@ -6,6 +6,16 @@ from vllm import LLM, SamplingParams
 from argparse import ArgumentParser
 import os
 from datetime import datetime
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+logger = logging.getLogger(__name__)
+
 
 from utils import (
     load_jsonl, 
@@ -35,12 +45,10 @@ def load_dataset(
         
         # 根据record内容自动判断问题类型和选择问题字段
         is_multiple_choice = False
-        problem_key = "problem_w_choices"  # 默认使用problem
         
         if data['problem_w_choices'] != "":
             is_multiple_choice = True
             assert data['problem'] == ""
-            problem_key = "problem_w_choices"
         
         # 获取原始问题
         if is_multiple_choice:
@@ -99,8 +107,8 @@ def load_dataset(
                 for image_path in data['image']:
                     base64_uri = encode_image_to_base64(image_path)
                     if base64_uri:
-                        content.append({"type": "image_url","image_url": {"url": base64_uri}})
-            content.append({ "type": "text","text": problem})
+                        content.append({"type": "image_url", "image_url": {"url": base64_uri}})
+            content.append({ "type": "text", "text": problem})
             messages = [{"role": "user", "content": content}]
             prompt = processor.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
@@ -175,10 +183,11 @@ def main(args):
     else:
         bz = args.bz
 
-    for idx in tqdm(range(0, len(inputs), bz), 
-                desc="Inferencing", 
-                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed} < {remaining}, {rate_fmt}]"):
+    logger.info(f"Start inference with args:{ args=}")
+    print("="*50)
+    for idx in tqdm(range(0, len(inputs), bz), desc="Inferencing"):
         batch_inputs = inputs[idx : idx + bz]
+        logger.info(f"Processing batch {idx//bz + 1}, size: {len(batch_inputs)}")
         outputs = llm.generate(batch_inputs, sampling_params)
         with open(args.save_name, "a", encoding="utf-8") as f:
             for i in range(len(outputs)):
@@ -233,8 +242,10 @@ if __name__ == "__main__":
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--end", type=int, default=-1)
     parser.add_argument("--system_prompt", type=str, default="")
+    # pre_prompt source: https://github.com/mathllm/MATH-V/blob/main/models/Qwen-VL.py:L27
     parser.add_argument("--pre_prompt", type=str, default='Please solve the problem step by step and put your answer in one "\\boxed{}". If it is a multiple choice question, only one letter is allowed in the "\\boxed{}".')
-    parser.add_argument("--after_prompt", type=str, default="")
+    # parser.add_argument("--after_prompt", type=str, default='You FIRST think about the reasoning process as an internal monologue and then provide the final answer.\n The reasoning process MUST BE enclosed within <think> </think> tags. The final answer MUST BE put within <answer> </answer> tags. Your answer should be like <answer>\\boxed{Your answer}</answer>')
+    parser.add_argument("--after_prompt", type=str, default='')
     parser.add_argument("--hdfs", type=int, default=0)
     parser.add_argument("--bz", type=int, default=20)
     parser.add_argument("--has_images", type=int, default=1)
@@ -246,7 +257,6 @@ if __name__ == "__main__":
     print("=" * 50)
     print(f"输入文件: {args.input_file}")
     print(f"输出文件: {args.save_name}")
-    print("问题类型: 自动判断（多选题/数值题）")
     
     main(args)
     print("Eval script finished.")

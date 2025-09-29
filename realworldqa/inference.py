@@ -223,7 +223,7 @@ if __name__ == "__main__":
     parser.add_argument("--modality", type=str, default="image")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--top_p", type=float, default=1.0)
-    parser.add_argument("--top_k", type=int, default=50)
+    parser.add_argument("--top_k", type=int, default=1)
     parser.add_argument("--n", type=int, default=1)
     parser.add_argument("--max_new_tokens", type=int, default=8000)
     parser.add_argument("--repetition_penalty", type=float, default=1.0)
@@ -239,5 +239,6 @@ if __name__ == "__main__":
     parser.add_argument("--primary_key", type=str, default="id")
 
     args = parser.parse_args()
+    # TODO; 引入重试机制
     main(args)
     print("Inference script finished. output saved to ", args.save_name)
