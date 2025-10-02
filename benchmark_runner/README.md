@@ -4,12 +4,11 @@ This toolkit allows running multiple vision-language benchmarks in parallel, pro
 
 ## Prerequisites
 
-Before running the benchmarks, make sure you have the following dependencies installed, despite common package including `vllm` and `torch`
+Before running the benchmarks, make sure you have the following dependencies installed, despite common package including `vllm` and `torch`.
 
 ```bash
 pip install latex2sympy2 # MathVision.utils 
 pip install Levenshtein # MathVista.calculate_score
-# Other dependencies as required by individual benchmarks
 ```
 
 ## File Structure
@@ -40,7 +39,7 @@ export CKPT_PATH="/path/to/your/vprm_checkpoint"
 ```
 bash run_all.sh
 ```
-If some raw files requiring the right location are missing, it will throw errors and corresponding installation path. Please follow the instructions to download them all.
+If some raw files requiring the right location are missing, it will throw errors and corresponding download path. Please follow the instructions to download them all.
 
 ### Run Individual Benchmarks
 You can also run individual benchmarks separately:
@@ -69,8 +68,3 @@ After running the benchmarks, results will be available in:
 - MME-RealWorld-Lite: MME-RealWorld-Lite/data/MME-RealWorld-Lite_judged_{RUN_ID}.jsonl
 - RealWorldQA: realworldqa/data/RealWorldQA_judged_{RUN_ID}.jsonl
 Logs for each benchmark are stored in logs/{RUN_ID}/.
-
-## Resource Management
-The parallel execution uses separate VLLM server instances for each benchmark, each running on a different port. This approach maximizes resource utilization while preventing conflicts between benchmarks.
-
-Each VLLM server is automatically started before running a benchmark and shut down after completion.
