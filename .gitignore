@@ -1,18 +1,34 @@
+# 改变忽略规则的顺序和具体性
 *.pyc
+**/__pycache__/
 
+# 先忽略特定的大型数据目录
+data/
+datasets/
 
-# Ignore all files in any images directory (but keep the directory structure)
+# 但不忽略特定的 data 子目录
+!MME-RealWorld-Lite/data/
+!MathVision/data/
+
+# 然后在特定的 data 子目录中忽略大多数文件
+MME-RealWorld-Lite/data/*
+MathVision/data/*
+
+# 但保留特定文件
+!MME-RealWorld-Lite/data/unzip_file.sh
+!MME-RealWorld-Lite/data/MME-RealWorld-Lite.json
+!MathVision/data/test.jsonl
+
+# 忽略 images 目录中的所有文件，但保留目录结构
 **/images/*
 
-# Ignore all log files everywhere
+# 忽略所有日志文件
 *.log
 **/*.log
-
-# Optional: Also ignore common log directories
 logs/
 **logs/
 
-# Ignore large model files
+# 忽略大型模型文件
 *.bin
 *.safetensors
 *.onnx
@@ -21,32 +37,19 @@ logs/
 *.model
 *.pkl
 
-# Ignore dataset files
+# 忽略数据集文件
 *.csv
 *.tsv
 **/*.parquet
 
-# Ignore large directories
+# 忽略大型目录
 models/
 checkpoints/
-data/
-datasets/
 
 **/*.zip
 
 test/
-
 *_official/
-
 tmp/**
-
-__pycache__/
 results/
 outputs/
-
-
-# not ignore these files
-!MME-RealWorld-Lite/data/unzip_file.sh
-!MathVision/data/test.jsonl
-
-

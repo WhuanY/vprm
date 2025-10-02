@@ -4,10 +4,11 @@ This toolkit allows running multiple vision-language benchmarks in parallel, pro
 
 ## Prerequisites
 
-Before running the benchmarks, make sure you have the following dependencies installed:
+Before running the benchmarks, make sure you have the following dependencies installed, despite common package including `vllm` and `torch`
 
 ```bash
-pip install latex2sympy2
+pip install latex2sympy2 # MathVision.utils 
+pip install Levenshtein # MathVista.calculate_score
 # Other dependencies as required by individual benchmarks
 ```
 
@@ -29,6 +30,7 @@ pip install latex2sympy2
 ### One-Click Run All Benchmarks
 
 1. Edit `config.sh` to set your model checkpoint path:
+The default setting for GPU allocation is one GPU for one benchmark inference . Therefore, set four gpus for running evaluation
 
 ```bash
 export CKPT_PATH="/path/to/your/vprm_checkpoint"
@@ -38,6 +40,7 @@ export CKPT_PATH="/path/to/your/vprm_checkpoint"
 ```
 bash run_all.sh
 ```
+If some raw files requiring the right location are missing, it will throw errors and corresponding installation path. Please follow the instructions to download them all.
 
 ### Run Individual Benchmarks
 You can also run individual benchmarks separately:
@@ -54,6 +57,9 @@ bash benchmarks/mme_realworld.sh
 # Run RealWorldQA benchmark
 bash benchmarks/realworldqa.sh
 ```
+
+### Reading the log files
+During inference, see `logs/$BASE_DIR/logs/$INFERENCE_RUN_ID/` for the running details.
 
 ## Results
 After running the benchmarks, results will be available in:

@@ -38,7 +38,7 @@ run_mathvista() {
         --score_file "scores_$INFERENCE_RUN_ID.json" > "$LOG_DIR/mathvista_scores.log" 2>&1
     
     echo "MathVista evaluation completed. Results in: $BASE_DIR/MathVista/results/$INFERENCE_RUN_ID/scores_$INFERENCE_RUN_ID.json"
-    echo "MathVista DONE" > "$LOG_DIR/mathvista_done.flag" # TODO: Flag 是啥
+    echo "MathVista DONE" > "$LOG_DIR/mathvista_done.flag"
 }
 
 # Run the benchmark if this script is executed directly

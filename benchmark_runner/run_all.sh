@@ -11,22 +11,23 @@ check_all_raw_files
 # Create logs directory
 mkdir -p "$BASE_DIR/logs/$INFERENCE_RUN_ID"
 
-# Function to start VLLM server with a specific port
 start_vllm_server() {
     local PORT="$1"
-    echo "Starting VLLM server on port $PORT..."
+    local GPU_ID="$2"  # 接收 GPU ID 参数
+    echo "Starting VLLM server on port $PORT using GPU $GPU_ID..."
     
-    nohup vllm serve "$CKPT_PATH" \
+    # 设置 CUDA_VISIBLE_DEVICES 环境变量
+    CUDA_VISIBLE_DEVICES="$GPU_ID" nohup vllm serve "$CKPT_PATH" \
         --port "$PORT" \
         --host "0.0.0.0" \
         --tensor-parallel-size "$VLLM_TENSOR_PARALLEL_SIZE" > "$BASE_DIR/logs/$INFERENCE_RUN_ID/vllm_server_$PORT.log" 2>&1 &
     
     local SERVER_PID=$!
-    echo "VLLM server started with PID: $SERVER_PID on port $PORT"
+    echo "VLLM server started with PID: $SERVER_PID on port $PORT using GPU $GPU_ID"
     
     # Wait for server to start
     echo "Waiting for VLLM server to initialize (30 seconds)..."
-    sleep 30
+    sleep 40
     
     # Check if server is running
     if ! ps -p $SERVER_PID > /dev/null; then
@@ -43,6 +44,10 @@ start_vllm_server() {
 stop_vllm_server() {
     local PORT="$1"
     echo "Stopping VLLM server on port $PORT..."
+    if [ "$PORT" == "0000" ]; then
+        echo "No VLLM server to stop for port $PORT."
+        return 0
+    fi
     pkill -f "vllm serve.*--port $PORT" || true
 }
 
@@ -50,13 +55,44 @@ stop_vllm_server() {
 run_benchmark_parallel() {
     local BENCHMARK="$1"
     local PORT="$2"
+    local GPU_ID="$3"  # 接收 GPU ID 参数
     
     # Start VLLM server
-    start_vllm_server "$PORT" || return 1
+    if [ "$PORT" == "0000" ]; then
+    echo "$BENCHMARK does not require VLLM server. Skipping server startup."
+    bash "$BASE_DIR/benchmark_runner/benchmarks/${BENCHMARK}.sh" "$PORT" "$GPU_ID"
+    else
+        echo "$BENCHMARK requires VLLM server. Starting server..."
+
+        # 检查 GPU_ID 是否设置
+        if [ -z "$GPU_ID" ]; then
+            echo "Error: GPU_ID is not set. Cannot start VLLM server."
+            exit 1
+        fi
+
+        # 启动 VLLM 服务器
+        start_vllm_server "$PORT" "$GPU_ID" || {
+            echo "Error: Failed to start VLLM server on port $PORT with GPU $GPU_ID."
+            exit 1
+        }
+
+        # 在这里之前，确保server已经启动成功
+        sleep 300
+
+        # 确认server已经启动成功    
+        if ! curl -s -o /dev/null -w "%{http_code}" http://localhost:$PORT/health | grep -q "200"; then
+            echo "ERROR: VLLM server is not ready after 5 minutes wait." Try extend the sleep time or check the server logs.
+            stop_vllm_server "$PORT"
+            exit 1
+        fi
+        bash "$BASE_DIR/benchmark_runner/benchmarks/${BENCHMARK}.sh" "$PORT" "$GPU_ID"
+
+        echo "VLLM server started successfully on port $PORT with GPU $GPU_ID."
+        
+        # Run benchmark
+        echo "Starting $BENCHMARK benchmark on port $PORT with GPU $GPU_ID..."
+    fi
     
-    # Run benchmark
-    echo "Starting $BENCHMARK benchmark on port $PORT..."
-    bash "$BASE_DIR/benchmarks/${BENCHMARK}.sh" "$PORT"
     
     # Stop VLLM server
     stop_vllm_server "$PORT"
@@ -69,15 +105,15 @@ echo "Starting all benchmarks in parallel..."
 
 # Define ports for each benchmark to avoid conflicts
 MATHVISTA_PORT=9753
-MATHVISION_PORT=9754
-MME_REALWORLD_PORT=9755
-REALWORLDQA_PORT=9756
+MATHVISION_PORT=0000 # MATHVISION推理不用vllm, 目前这个比较慢
+MME_REALWORLD_PORT=0000 # MME-RealWorld-Lite推理不用vllm，比较慢
+REALWORLDQA_PORT=0000 # RealWorldQA推理不用vllm，比较慢
 
 # Run benchmarks in parallel
-run_benchmark_parallel "mathvista" "$MATHVISTA_PORT" &
-run_benchmark_parallel "mathvision" "$MATHVISION_PORT" &
-run_benchmark_parallel "mme_realworld" "$MME_REALWORLD_PORT" &
-run_benchmark_parallel "realworldqa" "$REALWORLDQA_PORT" &
+run_benchmark_parallel "mathvista" "$MATHVISTA_PORT" "${CUDA_DEVICES_ARRAY[0]}"&
+run_benchmark_parallel "mathvision" "$MATHVISION_PORT" "${CUDA_DEVICES_ARRAY[1]}"&
+run_benchmark_parallel "mme_realworld" "$MME_REALWORLD_PORT" "${CUDA_DEVICES_ARRAY[2]}"&
+run_benchmark_parallel "realworldqa" "$REALWORLDQA_PORT" "${CUDA_DEVICES_ARRAY[3]}"&
 
 # Wait for all benchmarks to complete
 wait

@@ -6,6 +6,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../config.sh"
 
 run_mathvision() {
     local PORT="${1:-$VLLM_INFERENCE_PORT}"
+    local GPU_ID="$2"  # 接收 GPU ID 参数
     local LOG_DIR="$BASE_DIR/logs/$INFERENCE_RUN_ID"
     mkdir -p "$LOG_DIR"
     
@@ -31,7 +32,7 @@ run_mathvision() {
         --output_file "data/MathVision_testmini.json" > "$LOG_DIR/mathvision_preprocess_testmini.log" 2>&1
     
     echo "Generating responses for MathVision..."
-    python inference.py \
+    CUDA_VISIBLE_DEVICES=$GPU_ID python inference.py \
         --model_name_or_path "$CKPT_PATH" \
         --input_file "data/MathVision_$MATHVISION_SUBSET.json" \
         --save_name "data/MathVision-${MATHVISION_SUBSET}_inferenced_$INFERENCE_RUN_ID.jsonl" \
@@ -63,5 +64,6 @@ run_mathvision() {
 # Run the benchmark if this script is executed directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     PORT="$1"
-    run_mathvision "$PORT"
+    GPU_ID="$2"  # 接收 GPU ID 参数
+    run_mathvision "$PORT" "$GPU_ID"
 fi

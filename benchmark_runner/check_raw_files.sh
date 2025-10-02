@@ -72,8 +72,9 @@ check_mme_realworld_lite() {
     fi
 
     # Check image count
-    if [ $(find "$MME_REALWORLD_LITE_DIR/images" -type f \( -iname "*.png" -o -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.webp" \) 2>/dev/null | wc -l) -lt 1543 ]; then
+    if [ $(find "$IMAGE_BASE_DIR_MME_REALWORLD_LITE" -type f \( -iname "*.png" -o -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.webp" \) 2>/dev/null | wc -l) -lt 1543 ]; then
         echo "Warning: MME-RealWorld-Lite images count is less than 1543."
+        echo "Run: wget -O <IMAGE_BASE_DIR_MME_REALWORLD_LITE> https://huggingface.co/datasets/yifanzhang114/MME-RealWorld-Lite/resolve/main/data.zip then unzip it."
     fi
 
     echo "MME-RealWorld-Lite data check completed."

@@ -6,6 +6,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../config.sh"
 
 run_mme_realworld() {
     local PORT="${1:-$VLLM_INFERENCE_PORT}"
+    local GPU_ID="$2" 
     local LOG_DIR="$BASE_DIR/logs/$INFERENCE_RUN_ID"
     mkdir -p "$LOG_DIR"
     
@@ -27,7 +28,7 @@ run_mme_realworld() {
         --image_base_dir "$IMAGE_BASE_DIR_MME_REALWORLD_LITE" > "$LOG_DIR/mme_preprocess.log" 2>&1
     
     echo "Inferencing for MME-RealWorld-Lite..."
-    python inference.py \
+    CUDA_VISIBLE_DEVICES=$GPU_ID python inference.py \
         --model_name_or_path "$CKPT_PATH" \
         --input_file "data/MME-RealWorld-Lite_unified.json" \
         --save_name "data/MME-RealWorld-Lite_inferenced_$INFERENCE_RUN_ID.jsonl" \
@@ -49,5 +50,6 @@ run_mme_realworld() {
 # Run the benchmark if this script is executed directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     PORT="$1"
-    run_mme_realworld "$PORT"
+    GPU_ID="$2"  # 接收 GPU ID 参数
+    run_mme_realworld "$PORT" "$GPU_ID"
 fi
