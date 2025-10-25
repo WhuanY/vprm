@@ -39,3 +39,10 @@ tmp/**
 
 # not ignore these files
 !MME-RealWorld-Lite/data/unzip_file.sh
+BLINK_Benchmark/eval/outputs
+BLINK_Benchmark/eval/saved_outputs
+BLINK_Benchmark/eval/saved_val_predictions
+BLINK_Benchmark/eval/saved_test_predictions
+BLINK_Benchmark/eval/val_predictions
+MathVista/results/
+MathVision/outputs/

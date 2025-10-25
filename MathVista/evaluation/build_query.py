@@ -149,9 +149,8 @@ def refine_ocr(ocr):
     return ocr
 
 
-def create_one_query(problem, examples, shot_num, shot_type, use_caption, use_ocr):
-
-
+def create_one_query(problem, examples, shot_num, shot_type, use_caption, use_ocr, args):
+    
     ### [1] Demo prompt
     if shot_num == 0:
         demo_prompt = ""
@@ -267,7 +266,14 @@ def create_one_query(problem, examples, shot_num, shot_type, use_caption, use_oc
 
     ### [3] Final query
     query = demo_prompt + "\n\n" + test_query
+    if args.pre_prompt:
+        query = args.pre_prompt + "\n" + query
+    
+    if args.after_prompt:
+        query = query + args.after_prompt
+
     query = query.strip()
+
     return query
 
 
@@ -295,8 +301,9 @@ def create_query_data(data, caption_data, ocr_data, args):
             shot_num = args.shot_num,
             shot_type = args.shot_type,
             use_caption = args.use_caption,
-            use_ocr = args.use_ocr
-            )
+            use_ocr = args.use_ocr,
+            args = args
+        )
         query_data[pid] = query
 
     return query_data

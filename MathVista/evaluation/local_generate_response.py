@@ -156,6 +156,8 @@ def parse_args():
     parser.add_argument('--shot_num', type=int, default=0, help='number of shot examples')
     parser.add_argument('--use_caption', action='store_true', help='use caption data')
     parser.add_argument('--use_ocr', action='store_true', help='use ocr data')
+    parser.add_argument('--pre_prompt', type=str, default="")
+    parser.add_argument('--after_prompt',type=str, default="")
     # other settings
     parser.add_argument('--rerun', action='store_true', help='rerun answer extraction for all problems')
     parser.add_argument('--debug', action='store_true', help='debug mode')

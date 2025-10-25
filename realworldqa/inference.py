@@ -51,6 +51,9 @@ def load_dataset(
         else:
             problem = data["problem"]
 
+        if args.use_cot == "1":
+            problem = problem.replace("\nPlease answer directly with only the letter of the correct option and nothing else.", "")
+            problem = problem.replace("\nPlease answer directly with a single word or number.", "")
         problem = problem + "\n" + final_prompt
         
         if args.pre_prompt:
@@ -169,7 +172,6 @@ def main(args):
         stop_token_ids=[tokenizer.eos_token_id]
         + tokenizer.additional_special_tokens_ids,
     )
-
     if not args.bz:
         bz = len(raw_dataset)
     else:
@@ -237,6 +239,7 @@ if __name__ == "__main__":
     parser.add_argument("--bz", type=int, default=20)
     parser.add_argument("--has_images", type=int, default=1)
     parser.add_argument("--primary_key", type=str, default="id")
+    parser.add_argument("--use_cot", type=str, default="1")
 
     args = parser.parse_args()
     main(args)

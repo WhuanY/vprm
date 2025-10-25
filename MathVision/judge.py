@@ -1,23 +1,54 @@
 import json
+import re
 import time
 from openai import OpenAI
 import tqdm
+import threading
+from queue import Queue
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from argparse import ArgumentParser
 
-
-def extract_answer_from_response(response: str) -> str:
+def extract_answer_from_response(response: str):
     """
-    从模型回答中提取最终答案，假设答案在最后一个\boxed{}中
+    从response中提取模型的最终答案
     """
-    import re
-    # 使用正则表达式查找所有\boxed{...}模式
-    matches = re.findall(r'\\boxed\{(.*?)\}', response)
-    if matches:
-        # 返回最后一个匹配的内容作为答案
-        return matches[-1].strip()
-    else:
-        # 如果没有找到，返回整个响应的简化版本
-        return response.strip().split('\n')[-1].strip()
+    if "<answer>" in response.lower() and "</answer>" in response.lower(): # use COT
+        answer_match = re.search(r'<answer>\s*(.*?)\s*</answer>', response, re.DOTALL)
+        if answer_match:
+            # 判断是否是单个字母答案, 如果是，返回该字母的upper形式
+            model_answer = answer_match.group(1).strip()
+            if len(model_answer) == 1 and model_answer.upper() in "ABCDE":
+                return model_answer.upper()
+            for option in "ABCDE":
+                if model_answer.startswith(f"({option})"): # (A)
+                    return option
+                if model_answer.startswith(f"{option}."): # A.
+                    return option
+                if model_answer.startswith(f"{option})"): # A)
+                    return option
+                if model_answer.startswith(f"{option} "): # A 
+                    return option
+            # 判断是否是digit答案
+            if model_answer.isdigit():
+                return model_answer
+            return answer_match.group(1).strip()
+        return response
+    else: # no COT
+        if len(response.strip()) == 1 and response.strip().upper() in "ABCDE":
+            return response.strip().upper()
+        model_answer = response.strip()
+        for option in "ABCDE":
+            if model_answer.startswith(f"({option})"): # (A)
+                return option
+            if model_answer.startswith(f"{option}."): # A.
+                return option
+            if model_answer.startswith(f"{option})"): # A)
+                return option
+            if model_answer.startswith(f"{option} "): # A 
+                return option
+        if response.strip().isdigit():
+            return response.strip()
+        return response
 
 
 def judge_with_gpt4o(response, golden_ans, question, id_field, client):
@@ -26,7 +57,7 @@ def judge_with_gpt4o(response, golden_ans, question, id_field, client):
     """
     try:
         # 构建提示
-        prompt = f"""Judge whether the model's answer to the multiple-choice question is correct.
+        prompt = f"""Judge whether the model's answer to the question is correct.
 
 question_id {id_field}
 
@@ -47,14 +78,14 @@ Please judge and response strictly, respond with only 0 or 1, where 1 means the 
                 {"role": "user", "content": prompt}
             ],
             max_tokens=5,
-            temperature=0
+            temperature=0,
+            
         )
         
         # 提取结果
         result = completion.choices[0].message.content.strip()
         
         # 标准化结果
-        # 在这里打印判断输入，以免需要的时候无所参考。
         if "1" in result:
             print(f"[INFO] GPT-4o-mini Jugde Right, {result=}, {golden_ans=}, {response=}")
             return 1
@@ -95,64 +126,120 @@ def load_inference_results(input_file):
     return data
 
 
+def process_single_item(idx, data, client, args):
+    """处理单个数据项"""
+    # Extract necessary information
+    problem = data.get('problem', '')
+    problem_w_choices = data.get('problem_w_choices', '')
+    answer = data.get('answer', '')
+    answer_w_choices = data.get('answer_w_choices', '')
+    
+    # Determine question and standard answer
+    if problem_w_choices and not problem:
+        question = problem_w_choices
+        standard_answer = answer_w_choices
+    elif problem and not problem_w_choices:
+        question = problem
+        standard_answer = answer
+    else:
+        # Handle edge cases
+        question = problem_w_choices if problem_w_choices else problem
+        standard_answer = answer_w_choices if answer_w_choices else answer
+
+    # Get model response (first element if it's a list)
+    model_response = data.get('response', [''])[0] if isinstance(data.get('response'), list) else data.get('response', '')
+    
+    # Get ID
+    id_field = data.get('id', 'unknown')
+    
+    # First we try exact match
+    extracted_answer = extract_answer_from_response(model_response)
+    # print(f"Extracted answer: {extracted_answer}")
+    normalized_model_answer = extracted_answer.strip().lower()
+    normalized_std_answer = standard_answer.strip().lower()
+    # print(f"Comparing model response and standard answer: {normalized_model_answer=} vs {normalized_std_answer=}")
+    
+    if normalized_model_answer == normalized_std_answer:
+        print(f"idx: {idx} exact match. {normalized_model_answer=}, {normalized_std_answer=}")
+        judgment = 1
+    else:
+        # If we cannot judge via exact match, we use gpt4o to judge
+        print("Using GPT-4o-mini for judgment...")
+        judgment = judge_with_gpt4o(model_response, standard_answer, question, id_field, client)
+    
+    result = {
+        "id": id_field,
+        "question": question,
+        "standard_answer": standard_answer,
+        "model_response": model_response,
+        "judgment": judgment
+    }
+    
+    # Add original data fields
+    for key, value in data.items():
+        if key not in result:
+            result[key] = value
+    
+    return idx, result
+
+
 def run_judge_evaluation(inference_data, client, args):
-    """Run judge evaluation using GPT-4o-mini"""
-    
-    results = []
-    
+    """Run judge evaluation using GPT-4o-mini with multithreading"""
     print(f"Running judge evaluation on {len(inference_data)} samples...")
     
-    for idx, data in enumerate(tqdm.tqdm(inference_data)):
-        # Extract necessary information
-        problem = data.get('problem', '')
-        problem_w_choices = data.get('problem_w_choices', '')
-        answer = data.get('answer', '')
-        answer_w_choices = data.get('answer_w_choices', '')
-        
-        # Determine question and standard answer
-        if problem_w_choices and not problem:
-            question = problem_w_choices
-            standard_answer = answer_w_choices
-        elif problem and not problem_w_choices:
-            question = problem
-            standard_answer = answer
-        else:
-            # Handle edge cases
-            question = problem_w_choices if problem_w_choices else problem
-            standard_answer = answer_w_choices if answer_w_choices else answer
-        
-        # Get model response (first element if it's a list)
-        model_response = data.get('response', [''])[0] if isinstance(data.get('response'), list) else data.get('response', '')
-        # Get ID
-        id_field = data.get('id', 'unknown')
-        
-        # Judge with GPT-4o-mini
-        # first we try exact match
-        normalized_model_resp = model_response.strip().lower()
-        normalized_std_answer = standard_answer.strip().lower()
-        if normalized_model_resp == normalized_std_answer:
-            print(f"idx: {idx} exact match. {normalized_model_resp=}, {normalized_std_answer=}")
-            judgment = 1
-        else:
-            # if we cannot judge via exact match, we use gpt4o to judge
-            judgment = judge_with_gpt4o(model_response, standard_answer, question, id_field, client)
-        
-        result = {
-            "id": id_field,
-            "question": question,
-            "standard_answer": standard_answer,
-            "model_response": model_response,
-            "judgment": judgment
-        }
-        
-        # Add original data fields
-        for key, value in data.items():
-            if key not in result:
-                result[key] = value
-        
-        results.append(result)
+    results = {}
+    error_count = 0
     
-    return results
+    with ThreadPoolExecutor(max_workers=50) as executor:
+        future_to_idx = {
+            executor.submit(process_single_item, idx, data, client, args): idx 
+            for idx, data in enumerate(inference_data)
+        }
+
+        # 创建进度条
+        pbar = tqdm.tqdm(total=len(future_to_idx), desc="Processing")
+        
+        for future in as_completed(future_to_idx):
+            original_idx = future_to_idx[future]
+            try:
+                # 获取处理结果
+                idx, result = future.result()
+                results[idx] = result
+                
+            except Exception as e:
+                error_count += 1
+                print(f"\n[ERROR] Processing idx {original_idx} failed: {e}")
+                # 失败时创建默认结果
+                data = inference_data[original_idx]
+                result = {
+                    "id": data.get('id', 'unknown'),
+                    "question": data.get('problem_w_choices', '') or data.get('problem', ''),
+                    "standard_answer": data.get('answer_w_choices', '') or data.get('answer', ''),
+                    "model_response": data.get('response', [''])[0] if isinstance(data.get('response'), list) else data.get('response', ''),
+                    "judgment": 0
+                }
+                # Add original data fields
+                for key, value in data.items():
+                    if key not in result:
+                        result[key] = value
+                results[original_idx] = result
+            
+            finally:
+                pbar.update(1)
+                # 实时显示准确率
+                if len(results) > 0:
+                    current_acc = sum(1 for r in results.values() if r.get("judgment") == 1) / len(results)
+                    pbar.set_postfix({
+                        'acc': f'{current_acc:.4f}',
+                        'errors': error_count
+                    })
+        
+        pbar.close()
+    
+    # 按索引排序，转换为列表
+    results_list = [results[i] for i in sorted(results.keys())]
+    
+    return results_list
 
 
 def calculate_metrics(results):

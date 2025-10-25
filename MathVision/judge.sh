@@ -1,5 +1,5 @@
 python judge.py \
-    --input_file data/MathVision-test_inferenced_qwen25vl3b-inst.jsonl \
+    --input_file data/trm_140_base-rm_conflict-it1-trm_global_step_80-judge_res-full.jsonl \
     --judge_api "https://aigc.x-see.cn/v1" \
-    --api_key "sk-xxxxx" \
-    --output_file data/MathVision-test_inferenced_qwen25vl3b-inst.jsonl > data/judge_qwen2vl7b.log 2>&1 &
+    --api_key "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+    --output_file data/trm_140_base-rm_conflict-it1-trm_global_step_80-judge_res-full.jsonl > data/trm_140_base-rm_conflict-it1-trm_global_step_80-judge_res-full.log 2>&1 &

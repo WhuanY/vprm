@@ -6,6 +6,7 @@ from collections import defaultdict
 import openai
 import time
 
+
 def extract_answer_from_response(response):
     """
     从response中提取单个字母答案
@@ -156,6 +157,8 @@ def main(args):
     1. 尝试从响应中提取答案
     2. 如果提取成功，直接比较；否则使用GPT-4o-mini判断
     """
+    client = openai.OpenAI(api_key=args.api_key, base_url=args.judge_api)
+
     input_file = args.input_file
     
     # 总体统计
@@ -200,7 +203,7 @@ def main(args):
             else:
                 # 使用GPT-4o-mini判断
                 print(f"无法直接提取答案，使用GPT-4o-mini判断...")
-                judge_result = judge_with_gpt4o(response, golden_ans, question, id_field)
+                judge_result = judge_with_gpt4o(response, golden_ans, question, id_field, client)
                 is_correct = judge_result == 1
                 print(f"GPT-4o-mini判断结果: {'正确' if is_correct else '错误'}")
             

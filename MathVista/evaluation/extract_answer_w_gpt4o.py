@@ -53,9 +53,16 @@ def extract_answer(model, response, problem, quick_extract=False):
 
     if response == "":
         return ""
+    
+    answer_match = re.search(r'<answer>\s*(.*?)\s*</answer>', response, re.DOTALL)
+    if answer_match:
+        response = answer_match.group(1).strip()
 
-    if question_type == 'multi_choice' and response in choices:
-        return response
+    if question_type == 'multi_choice':
+        if response in choices: # choices是选项内容，而不是ABCDEEF，这个老六
+            return response
+
+    
 
     if answer_type == "integer":
         try:

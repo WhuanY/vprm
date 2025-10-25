@@ -83,7 +83,7 @@ def eval_tuple(s):
     return s
 
 
-def is_equal(asw: str, gt_asw: str) -> bool:
+def is_equal(asw: str, gt_asw: str) -> bool: # <- eval_tuple 
     """
     Judge if `asw` is equivalent to `gt_asw`.
 
