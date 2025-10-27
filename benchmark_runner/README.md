@@ -29,7 +29,7 @@ pip install Levenshtein # MathVista.calculate_score
 ### One-Click Run All Benchmarks
 
 1. Edit `config.sh` to set your model checkpoint path:
-The default setting for GPU allocation is one GPU for one benchmark inference . Therefore, set four gpus for running evaluation
+The default setting for GPU allocation is one GPU for one benchmark inference. Therefore, set four gpus for running evaluation
 
 ```bash
 export CKPT_PATH="/path/to/your/vprm_checkpoint"
