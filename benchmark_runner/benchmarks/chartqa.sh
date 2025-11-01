@@ -9,7 +9,7 @@ if [ $use_cot -eq 1 ]; then
     cot_suffix="_cot"
 else
     echo "Not using CoT inference"
-    pre_prompt=""
+    pre_prompt="Please try to answer the question with short words or phrases if possible."
     cot_suffix=""
 fi
 
@@ -32,7 +32,7 @@ run_chartqa() {
     mkdir -p "data"
 
     echo "Data preprocessing for ChartQA..."
-    python parquet_to_json.py --split "$split" --output_file "data/chartQA_${split}.json"
+    python parquet_to_json.py --split "$split" --output_file "data/chartQA_${split}.json" --split_human_machine
     echo "Generating Responses for ChartQA..."
 
     CUDA_VISIBLE_DEVICES=$GPU_ID python inference.py \
@@ -40,7 +40,7 @@ run_chartqa() {
     --pre_prompt "$pre_prompt" \
     --use_cot $use_cot \
     --input_file "data/chartQA_${split}.json" \
-    --save_name "data/chartQA_${split}_inferenced${cot_suffix}.jsonl" \
+    --save_name "data/chartQA_${split}_inferenced_${INFERENCE_RUN_ID}${cot_suffix}.jsonl" \
     --tp 1 \
     --bz 1 \
     --max_new_tokens 8000 > "$LOG_DIR/chartQA_${split}_inferenced_${INFERENCE_RUN_ID}${cot_suffix}.log" 2>&1
@@ -50,6 +50,7 @@ run_chartqa() {
         --input_file "data/chartQA_${split}_inferenced${cot_suffix}.jsonl" \
         --judge_api "$CUSTOMIZED_REMOTE_OPENAI_API_ENDPOINT" \
         --api_key "$CUSTOMIZED_REMOTE_OPENAI_API_KEY" \
+        --use_relax_accuracy \
         --output_file "data/chartQA_${split}_judged_${INFERENCE_RUN_ID}${cot_suffix}.jsonl" > "$LOG_DIR/chartqa_judge${cot_suffix}.log" 2>&1
 }
 
