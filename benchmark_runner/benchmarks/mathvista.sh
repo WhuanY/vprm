@@ -5,6 +5,8 @@
 source "$(dirname "${BASH_SOURCE[0]}")/../config.sh"
 
 use_cot=1
+concurrency=100
+
 if [ $use_cot -eq 1 ]; then
     echo "Using CoT inference"
     pre_prompt="You FIRST think about the reasoning process as an internal monologue and then provide the final answer.\n The reasoning process MUST BE enclosed within <think> </think> tags. The final answer MUST BE put within <answer> </answer> tags."
@@ -33,18 +35,24 @@ run_mathvista() {
     python local_generate_response.py \
         --inference_api "http://localhost:$PORT/v1" \
         --data_file_path "$BASE_DIR/MathVista/data/testmini-00000-of-00001-725687bf7a18d64b.parquet" \
+        --rerun \
         --pre_prompt "$pre_prompt" \
         --model_path "$CKPT_PATH" \
-        --output_dir "../results/$INFERENCE_RUN_ID$cot_suffix" \
-        --output_file "output_$INFERENCE_RUN_ID$cot_suffix.json" > "$LOG_DIR/mathvista_inference$cot_suffix.log" 2>&1
+        --output_dir "../results/$INFERENCE_RUN_ID${cot_suffix}" \
+        --num_threads $concurrency \
+        --output_file "output_$INFERENCE_RUN_ID${cot_suffix}.json" > "$LOG_DIR/mathvista_inference$cot_suffix.log" 2>&1
     
     echo "Extracting answers for MathVista..."
     python extract_answer_w_gpt4o.py \
+        --rerun \
+        --num_threads $concurrency \
         --results_file_path "../results/$INFERENCE_RUN_ID$cot_suffix/output_$INFERENCE_RUN_ID$cot_suffix.json" > "$LOG_DIR/mathvista_extract$cot_suffix.log" 2>&1
     
     echo "Calculating scores for MathVista..."
     python calculate_score.py \
         --data_file_path "$BASE_DIR/MathVista/data/testmini-00000-of-00001-725687bf7a18d64b.parquet" \
+        --judge_api $CUSTOMIZED_REMOTE_OPENAI_API_ENDPOINT \
+        --api_key $CUSTOMIZED_REMOTE_OPENAI_API_KEY \
         --output_dir "../results/$INFERENCE_RUN_ID$cot_suffix" \
         --output_file "output_$INFERENCE_RUN_ID$cot_suffix.json" \
         --score_file "scores_$INFERENCE_RUN_ID$cot_suffix.json" > "$LOG_DIR/mathvista_scores$cot_suffix.log" 2>&1

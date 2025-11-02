@@ -2,13 +2,15 @@ import argparse
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 from openai import AzureOpenAI, OpenAI
 from rich.logging import RichHandler
 from tqdm import tqdm
 
 # from evaluation.prompts.ext_ans import demo_prompt
-from prompts.ext_ans import demo_prompt
+from prompts.ext_ans import demo_prompt, demo_prompt_w_cot
 # from models import gpt
 from utilities import read_json, save_json
 
@@ -54,15 +56,22 @@ def extract_answer(model, response, problem, quick_extract=False):
     if response == "":
         return ""
     
-    answer_match = re.search(r'<answer>\s*(.*?)\s*</answer>', response, re.DOTALL)
+    extraction = None
+    answer_match = "<answer>" in response and "</answer>" in response
     if answer_match:
-        response = answer_match.group(1).strip()
-
+        extraction = response.split('<answer>')[-1].split('</answer>')[0].strip()
+    
     if question_type == 'multi_choice':
         if response in choices: # choices是选项内容，而不是ABCDEEF，这个老六
             return response
-
-    
+        if extraction is not None and extraction in choices:
+            return extraction
+        if extraction is not None:
+            for c in "ABCDE":
+                if extraction == c or extraction == c.lower():
+                    return c
+                if extraction == f"({c})":
+                    return c
 
     if answer_type == "integer":
         try:
@@ -71,12 +80,25 @@ def extract_answer(model, response, problem, quick_extract=False):
         except Exception as e:
             pass
 
+        if extraction is not None:
+            try:
+                extraction = int(extraction)
+                return str(extraction)
+            except Exception as e:
+                pass
+
     if answer_type == "float":
         try:
             extraction = str(float(response))
             return extraction
         except Exception as e:
             pass
+        if extraction is not None:
+            try:
+                extraction = str(float(extraction))
+                return extraction
+            except Exception as e:
+                pass
 
     # quick extraction
     if quick_extract:
@@ -93,6 +115,8 @@ def extract_answer(model, response, problem, quick_extract=False):
     # general extraction
     try:
         full_prompt = create_test_prompt(demo_prompt, query, response)
+        if answer_match:
+            full_prompt = create_test_prompt(demo_prompt_w_cot, query, response)
         extraction = model.get_response(user_prompt=full_prompt)
         return extraction
     except Exception as e:
@@ -119,6 +143,7 @@ def parse_args():
     # parser.add_argument('--azure_openai_model', type=str, default=os.getenv("AZURE_OPENAI_MODEL"))
     parser.add_argument('--customized_remote_openai_api_endpoint', type=str, default=os.getenv("CUSTOMIZED_REMOTE_OPENAI_API_ENDPOINT"))
     parser.add_argument('--customized_remote_openai_api_key', type=str, default=os.getenv("CUSTOMIZED_REMOTE_OPENAI_API_KEY"))
+    parser.add_argument('--num_threads', type=int, default=1, help='Number of concurrent threads for sending requests')
 
     args = parser.parse_args()
     return args
@@ -188,18 +213,57 @@ def main():
         logging.info(f'Limiting number of problems to {args.max_num_problems}.')
 
     logging.info(f"Number of test problems to run: {len(test_pids)}")
+    logging.info(f"Using {args.num_threads} thread(s) for concurrent request processing")
 
-    for i, pid in enumerate(tqdm(test_pids)):
-        problem = results[pid]
+    # Thread-safe lock for results dictionary and save counter
+    results_lock = threading.Lock()
+    processed_count = [0]  # Using list to allow modification in nested function
+
+    def process_problem(pid, index):
+        """Process a single problem and update results thread-safely"""
+        problem = results[pid].copy()
 
         assert label in problem
         response = problem[label]
         extraction = extract_answer(model, response, problem, args.quick_extract)
-        results[pid]['extraction'] = extraction
 
-        if (i % args.save_every == 0 and i > 0) or i == len(test_pids) - 1:
-            save_json(results, args.results_file_path)
-            logging.info(f"Saved results to {args.results_file_path}")
+        # Thread-safe update of results
+        with results_lock:
+            results[pid]['extraction'] = extraction
+            processed_count[0] += 1
+            current_count = processed_count[0]
+            
+            # Thread-safe saving
+            if (current_count % args.save_every == 0) or (current_count == len(test_pids)):
+                try:
+                    save_json(results, args.results_file_path)
+                    logging.info(f"Saved results to {args.results_file_path} (processed {current_count}/{len(test_pids)})")
+                except Exception as e:
+                    logging.info(f"Error in saving {args.results_file_path}")
+                    logging.info(e)
+        
+        return pid
+
+    # Process problems concurrently using ThreadPoolExecutor
+    if args.num_threads > 1:
+        with ThreadPoolExecutor(max_workers=args.num_threads) as executor:
+            # Submit all tasks
+            future_to_problem = {
+                executor.submit(process_problem, pid, i): pid 
+                for i, pid in enumerate(test_pids)
+            }
+            
+            # Process completed tasks with progress bar
+            for future in tqdm(as_completed(future_to_problem), total=len(test_pids), desc="Processing problems"):
+                pid = future_to_problem[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    logging.error(f"Exception occurred while processing {pid}: {e}")
+    else:
+        # Single-threaded mode (original behavior)
+        for i, pid in enumerate(tqdm(test_pids, desc="Processing problems")):
+            process_problem(pid, i)
 
     logging.info("MathVista: Extract Answers - Finish")
 

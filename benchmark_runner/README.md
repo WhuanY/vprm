@@ -45,20 +45,28 @@ If some raw files requiring the right location are missing, it will throw errors
 You can also run individual benchmarks separately:
 ```bash
 # Run MathVista benchmark
-bash benchmarks/mathvista.sh
+bash benchmarks/mathvista.sh 9753 # mathvista requires vllm serve before running
 
 # Run MathVision benchmark
-bash benchmarks/mathvision.sh
+bash benchmarks/mathvision.sh 0000 {gpu_id}
 
 # Run MME-RealWorld-Lite benchmark
-bash benchmarks/mme_realworld.sh
+bash benchmarks/mme_realworld.sh 0000 {gpu_id}
 
 # Run RealWorldQA benchmark
-bash benchmarks/realworldqa.sh
+bash benchmarks/realworldqa.sh 0000 {gpu_id}
+
+# Run ChartQA benchmark
+bash benchmarks/chartqa.sh 0000 {gpu_id}
 ```
+For the command example above, the `0000` is a placeholder indicates no need to start a vllm server before running the evaluation pipeline. For mathvista, you must start a vllm serve application before running the script.
+
 
 ### Reading the log files
 During inference, see `logs/$BASE_DIR/logs/$INFERENCE_RUN_ID/` for the running details.
+
+### Controlling concurrency
+For mathvista, you can modify the number of `concurrency=100` to speed up inference.
 
 ## Results
 After running the benchmarks, results will be available in:
@@ -67,4 +75,7 @@ After running the benchmarks, results will be available in:
 - MathVision: MathVision/outputs/evaluation_results.json
 - MME-RealWorld-Lite: MME-RealWorld-Lite/data/MME-RealWorld-Lite_judged_{RUN_ID}.jsonl
 - RealWorldQA: realworldqa/data/RealWorldQA_judged_{RUN_ID}.jsonl
+- ChartQA: chartqa/data/chartQA_${split}_judged_${INFERENCE_RUN_ID}${cot_suffix}.jsonl
+
 Logs for each benchmark are stored in logs/{RUN_ID}/.
+

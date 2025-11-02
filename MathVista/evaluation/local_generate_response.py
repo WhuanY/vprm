@@ -4,6 +4,8 @@ import logging
 import os
 import sys
 import base64
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 from datasets import load_dataset
 from openai import AzureOpenAI, OpenAI
@@ -165,6 +167,7 @@ def parse_args():
     parser.add_argument('--azure_openai_api_key', type=str, default=os.getenv("AZURE_OPENAI_API_KEY"))
     parser.add_argument('--azure_openai_api_version', type=str, default=os.getenv("AZURE_OPENAI_API_VERSION"))
     parser.add_argument('--azure_openai_model', type=str, default=os.getenv("AZURE_OPENAI_MODEL"))
+    parser.add_argument('--num_threads', type=int, default=1, help='Number of concurrent threads for sending requests')
     args = parser.parse_args()
     return args
 
@@ -320,45 +323,82 @@ def main():
         logging.warning(f'Limiting number of problems to {args.max_num_problems}.')
 
     logging.info(f"Number of test problems to run: {len(test_pids)}")
+    logging.info(f"Using {args.num_threads} thread(s) for concurrent request processing")
 
-    for i, problem_id in enumerate(tqdm(test_pids)):
+    # Thread-safe lock for results dictionary and save counter
+    results_lock = threading.Lock()
+    processed_count = [0]  # Using list to allow modification in nested function
+
+    def process_problem(problem_id, index):
+        """Process a single problem and update results thread-safely"""
         problem: dict = data[problem_id].copy()
 
         # Remove decoded Image for JSON deserialization
         problem_decoded_image = problem['decoded_image']
-        print(problem_decoded_image)
         problem.pop('decoded_image')
 
         query = query_data[problem_id]
 
         logging.debug("--------------------------------------------------------------")
         logging.debug(f"Generating response for problem: {problem_id}...")
+        
+        problem_result = None
         try:
             response = model.get_response(user_prompt=query, decoded_image=problem_decoded_image)
-            results[problem_id] = problem
-            results[problem_id]['query'] = query
+            problem_result = problem.copy()
+            problem_result['query'] = query
             if args.shot_type == 'solution':
-                results[problem_id]['response'] = response
+                problem_result['response'] = response
             else:
                 output, error = evaluate_code(response)
-                results[problem_id]['response'] = response
-                results[problem_id]['execution'] = output
-                results[problem_id]['error'] = str(error)
+                problem_result['response'] = response
+                problem_result['execution'] = output
+                problem_result['error'] = str(error)
             logging.debug(f"Query: \n{query}")
             logging.debug(f"Response: \n{response}")
         except Exception as e:
             logging.error(f"Error in extracting answer for {problem_id}")
             logging.error(e)
-            results[problem_id] = problem
-            results[problem_id]['error'] = str(e)
+            problem_result = problem.copy()
+            problem_result['error'] = str(e)
 
-        if (i % args.save_every == 0 and i > 0) or i == len(test_pids) - 1:
-            try:
-                save_json(results, output_file_path)
-                logging.info(f"Saved results to {output_file_path}")
-            except Exception as e:
-                logging.info(f"Error in saving {output_file_path}")
-                logging.info(e)
+        # Thread-safe update of results
+        with results_lock:
+            results[problem_id] = problem_result
+            processed_count[0] += 1
+            current_count = processed_count[0]
+            
+            # Thread-safe saving
+            if (current_count % args.save_every == 0) or (current_count == len(test_pids)):
+                try:
+                    save_json(results, output_file_path)
+                    logging.info(f"Saved results to {output_file_path} (processed {current_count}/{len(test_pids)})")
+                except Exception as e:
+                    logging.info(f"Error in saving {output_file_path}")
+                    logging.info(e)
+        
+        return problem_id
+
+    # Process problems concurrently using ThreadPoolExecutor
+    if args.num_threads > 1:
+        with ThreadPoolExecutor(max_workers=args.num_threads) as executor:
+            # Submit all tasks
+            future_to_problem = {
+                executor.submit(process_problem, problem_id, i): problem_id 
+                for i, problem_id in enumerate(test_pids)
+            }
+            
+            # Process completed tasks with progress bar
+            for future in tqdm(as_completed(future_to_problem), total=len(test_pids), desc="Processing problems"):
+                problem_id = future_to_problem[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    logging.error(f"Exception occurred while processing {problem_id}: {e}")
+    else:
+        # Single-threaded mode (original behavior)
+        for i, problem_id in enumerate(tqdm(test_pids, desc="Processing problems")):
+            process_problem(problem_id, i)
 
     logging.info("MathVista: Generating Responses - Finish")
 

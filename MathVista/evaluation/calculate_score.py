@@ -7,11 +7,43 @@ import re
 import pandas as pd
 from datasets import load_dataset
 
+from openai import OpenAI
+
 from Levenshtein import distance
 from rich.logging import RichHandler
 from tqdm import tqdm
 
 from utilities import read_json, save_json
+
+def judge_with_gpt4o(response, golden_ans, question, client):
+    """
+    使用GPT-4o-mini判断模型答案是否正确
+    """
+    prompt = f"""Judge whether the model's answer to the question is correct.
+question: {question}
+golden answer:{golden_ans}
+model response: 
+{response}
+Please judge and response strictly, respond with only 0 or 1, where 1 means the model response aligns with golden answer, and 0 means it is not aligned."""
+    
+    completion = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are an expert judge. Respond with only 0 or 1."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=5,
+        temperature=0,
+    )
+    
+    result = completion.choices[0].message.content.strip()
+    
+    if "1" in result:
+        print(f"[INFO] GPT-4o-mini Jugde Right, {result=}, {golden_ans=}, {response=}")
+        return 1
+    else:
+        print(f"[INFO] GPT-4o-mini Judge Wrong, {result=}, {golden_ans=}, {response=}")
+        return 0
 
 
 def get_most_similar(prediction, choices):
@@ -126,6 +158,10 @@ def parse_args():
     parser.add_argument('--output_dir', type=str, default='_results/eval/mathvista/llava/debug')
     parser.add_argument('--output_file', type=str, default="llava-v1.5-7b.json")
     parser.add_argument('--score_file', type=str, default="llava-v1.5-7b_metrics.json")
+    
+    # client
+    parser.add_argument('--api_key', type=str, default="sk-xxxxxx")
+    parser.add_argument('--judge_api', type=str, default="https://aigc.x-see.cn/v1")
     args = parser.parse_args()
     return args
 
@@ -133,6 +169,10 @@ def parse_args():
 def main():
     logging.info("MathVista: Calculating Scores - Start")
     args = parse_args()
+    client = OpenAI(
+        api_key=args.api_key,
+        base_url=args.judge_api
+    )
 
     logging.info(f"Loading dataset {args.dataset_name}, split {args.test_split_name}...")
     # data_list = load_dataset(args.dataset_name, split=args.test_split_name)
@@ -191,8 +231,13 @@ def main():
             ignore_empty_extractions=args.ignore_empty_extractions,
         )
 
-        # verify the prediction is true or false
-        true_false = safe_equal(prediction, answer)
+        if prediction is not None:
+            # verify the prediction is true or false
+            true_false = safe_equal(prediction, answer)
+        else: # if prediction is None, we use gpt to judge
+            question = problem['question']
+            response = problem['response']
+            true_false = bool(judge_with_gpt4o(response, answer, question, client))
 
         # update the problem
         if "true_false" not in problem:
