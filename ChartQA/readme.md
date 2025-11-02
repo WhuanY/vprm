@@ -5,7 +5,7 @@ Follow common practices, we evaluate the test set of ChartQA
 ```sh
 mkdir -p data
 cd data
-wget https://huggingface.co/datasets/AI4Math/ChartQA/resolve/main/data/test-00000-of-00001-e2cd0b7a0f9eb20d.parquet
+wget https://huggingface.co/datasets/HuggingFaceM4/ChartQA/resolve/main/data/test-00000-of-00001-e2cd0b7a0f9eb20d.parquet
 ```
 
 ### Step 2: Data Preparation

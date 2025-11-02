@@ -173,6 +173,35 @@ def is_exact_match(model_answer: str, standard_answer: str) -> bool:
     return normalized_model == normalized_standard
 
 
+def relaxed_correctness(target: str,
+                        prediction: str,
+                        max_relative_change: float = 0.05) -> bool:
+    """
+    5 % numeric tolerance.  Exact match for non‑numeric.
+    Implementation identical to pix2struct (avoids /0).
+    """
+    def _to_float(text: str):
+        try:
+            return float(text.rstrip('%')) / 100.0 if text.endswith('%') else float(text)
+        except ValueError:
+            return None
+
+    if "<answer>" in prediction:
+        prediction = prediction.split("<answer>")[-1].split("</answer>")[0]
+        target = str(target).strip()
+        print(prediction)
+    else:
+        prediction, target = str(prediction).strip(), str(target).strip()
+    p_float, t_float = _to_float(prediction), _to_float(target)
+
+    # NB: the "and t_float" check is what prevents ZeroDivisionError
+    if p_float is not None and t_float:
+        rel_change = abs(p_float - t_float) / abs(t_float)
+        return rel_change <= max_relative_change
+    else:
+        return prediction.lower() == target.lower()
+
+
 def _extract_number(text: str) -> float | None:
     """从文本中提取数字，支持多种格式。"""
     import re

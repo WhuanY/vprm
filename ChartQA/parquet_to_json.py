@@ -54,6 +54,7 @@ def single_record(split: str, idx: int, record: dict ):
         "answer": "",
         "answer_w_choices": "",
         "image": [],  # List of image paths
+        "human_or_machine": record.get('human_or_machine', -1)  # 0 for human, 1 for machine, -1 if unknown
     }
     
     # Manually assign ID using index
@@ -103,6 +104,8 @@ def main():
                        help='Path to output JSON file. If omitted, defaults to data/chartQA_<split>.json')
     parser.add_argument('--split', type=str, choices=['val', 'test'], default='test',
                        help='Dataset split to use when --input_files is not provided')
+    parser.add_argument('--split_human_machine', action='store_true',
+                       help='Whether to split human and machine questions separately')
 
     args = parser.parse_args()
 
@@ -135,17 +138,37 @@ def main():
         return
     
     df = pd.read_parquet(file_path)
+
+
+    
     results = []
     for idx, row in tqdm(df.iterrows()):
         record = row.to_dict()
         result = single_record(args.split, idx, record)
         results.append(result)
+
     
     # write
     with open(args.output_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, ensure_ascii=False, indent=4)
-
-
+    
+    if args.split_human_machine:
+        res_human = []
+        res_machine = []
+        for item in results:
+            item['label'] = item.pop('answer') if item['answer'] else item.pop('answer_w_choices')
+            item['imgname'] = item['image'][0].split('/')[-1]
+            item['query'] = item.pop('problem') if item['problem'] else item.pop('problem_w_choices')
+            if item['human_or_machine'] == 0:
+                res_human.append(item)
+            elif item['human_or_machine'] == 1:
+                res_machine.append(item)
+            else:
+                raise ValueError(f"Unknown human_or_machine value {item['human_or_machine']}")
+        with open(output_file.replace('.json', '_human.json'), 'w', encoding='utf-8') as f:
+            json.dump(res_human, f, ensure_ascii=False, indent=4)
+        with open(output_file.replace('.json', '_machine.json'), 'w', encoding='utf-8') as f:
+            json.dump(res_machine, f, ensure_ascii=False, indent=4)
 
 if __name__ == "__main__":
     main()

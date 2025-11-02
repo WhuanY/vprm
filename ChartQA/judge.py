@@ -9,7 +9,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from argparse import ArgumentParser
 
 from utils import (
-    is_exact_match
+    is_exact_match,
+    relaxed_correctness,
 )
 
 def extract_answer_from_response(response: str):
@@ -19,8 +20,20 @@ def extract_answer_from_response(response: str):
     if "<answer>" in response.lower() and "</answer>" in response.lower(): # use COT
         answer_match = response.split("<answer>")[-1].split("</answer>")[0]
         return answer_match.strip()
+    elif r'boxed{' in response:
+        # \boxed{...}
+        answer_match = re.findall(r'\\boxed\{(.*?)\}', response)
+        extracted_answer = ""
+        if answer_match:
+            extracted_answer = answer_match[-1].strip()
+            return extracted_answer
+        else: # boxed{...}
+            answer_match = re.findall(r'boxed\{(.*?)\}', response)
+            if answer_match:
+                extracted_answer = answer_match[-1].strip()
+            return extracted_answer
     else:
-        return response.strip()
+        return response.strip() # fallback to full response
 
 
 def judge_with_gpt4o(response, golden_ans, question, id_field, client):
@@ -128,7 +141,10 @@ def process_single_item(idx, data, client, args):
     extracted_answer = extract_answer_from_response(model_response)
     normalized_model_answer = extracted_answer.strip().lower()
     normalized_std_answer = standard_answer.strip().lower()
-    exact_match = is_exact_match(normalized_model_answer, normalized_std_answer)
+    if not args.use_relax_accuracy:
+        exact_match = is_exact_match(normalized_model_answer, normalized_std_answer)
+    elif args.use_relax_accuracy:
+        exact_match = relaxed_correctness(standard_answer, extracted_answer)
     
     if exact_match:
         print(f"idx: {idx} exact match. {normalized_model_answer=}, {normalized_std_answer=}")
@@ -217,17 +233,33 @@ def calculate_metrics(results):
     """Calculate evaluation metrics"""
     total_samples = len(results)
     correct_judgments = sum(1 for r in results if r["judgment"] == 1)
+
+    # Calculate total accuracy
     acc = correct_judgments / total_samples if total_samples > 0 else 0
-    
+
+    # Calculate human accuracy
+    human_samples = [r for r in results if r['human_or_machine'] == 0]
+    correct_human_judgments = sum(1 for r in human_samples if r["judgment"] == 1)
+    human_acc = correct_human_judgments / len(human_samples) if human_samples else 0
+
+    # Calculate machine accuracy
+    machine_samples = [r for r in results if r['human_or_machine'] == 1]
+    correct_machine_judgments = sum(1 for r in machine_samples if r["judgment"] == 1)
+    machine_acc = correct_machine_judgments / len(machine_samples) if machine_samples else 0
+
     print(f"\n=== Judge Evaluation Results ===")
     print(f"Total samples: {total_samples}")
     print(f"Correct judgments: {correct_judgments}")
-    print(f"Accuracy (acc): {acc:.4f} ({acc*100:.2f}%)")
-    
+    print(f"Total Accuracy (acc): {acc:.4f} ({acc * 100:.2f}%)")
+    print(f"Human Accuracy: {human_acc:.4f} ({human_acc * 100:.2f}%)")
+    print(f"Machine Accuracy: {machine_acc:.4f} ({machine_acc * 100:.2f}%)")
+
     return {
         "total_samples": total_samples,
         "correct_judgments": correct_judgments,
-        "acc": acc
+        "acc": acc,
+        "human_acc": human_acc,
+        "machine_acc": machine_acc
     }
 
 
@@ -279,6 +311,8 @@ if __name__ == "__main__":
     parser.add_argument("--output_file", type=str, 
                        required=True,
                        help="Output file for judge results")
+    parser.add_argument("--use_relax_accuracy", action='store_true',
+                       help="Whether to use relaxed accuracy for numeric answers")
     parser.add_argument("--judge_api", type=str, 
                        required=True,
                        help="API endpoint for GPT-4o-mini")
