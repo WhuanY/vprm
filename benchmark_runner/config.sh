@@ -2,12 +2,12 @@
 # config.sh - Common configuration variables for all benchmark scripts
 
 # GPU Configuration
-export CUDA_DEVICES_LIST="4,5,6,7,8"
+export CUDA_DEVICES_LIST="0,7"
 IFS=',' read -ra CUDA_DEVICES_ARRAY <<< "$CUDA_DEVICES_LIST"
 
 # API Endpoints for evaluation
 export CUSTOMIZED_REMOTE_OPENAI_API_ENDPOINT="https://aigc.x-see.cn/v1"
-export CUSTOMIZED_REMOTE_OPENAI_API_KEY="sk-xxx"
+export CUSTOMIZED_REMOTE_OPENAI_API_KEY="sk-xxxxxxxxxxxxxx"
 
 # VLLM Configuration
 export VLLM_WORKER_MULTIPROC_METHOD="spawn"

@@ -27,7 +27,7 @@ check_mathvision() {
     # Check/download evaluation script data
     if [ ! -f "$MATHVISION_DIR/data/test.jsonl" ]; then
         echo "MathVision evaluation script data dependency not found. Please Download it via:"
-        echo "wget -O $MATHVISION_DIR/data/test.jsonl https://github.com/mathllm/MathVision/raw/main/data/test.jsonl"
+        echo "wget -O $MATHVISION_DIR/data/test.jsonl https://github.com/mathllm/MATH-V/raw/main/data/test.jsonl"
         return 1
     fi
 
@@ -184,11 +184,11 @@ check_all_raw_files() {
     echo "Checking raw data integrity..."
     
     check_mathvision || return 1
-    check_mathvista || return 1
-    check_mme_realworld_lite || return 1
+    # check_mathvista || return 1
+    # check_mme_realworld_lite || return 1
     check_realworldqa || return 1
     check_blink || return 1
-    check_MMstar || return 1
+    check_MMStar || return 1
     check_chartqa || return 1
     
     echo "Raw data integrity check completed."

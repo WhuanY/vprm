@@ -1,23 +1,128 @@
 #!/bin/bash
 # realworldqa.sh - Run RealWorldQA benchmark
 
-# Source configuration
-source "$(dirname "${BASH_SOURCE[0]}")/../config.sh"
+# 脚本将在遇到任何错误时立即退出
+set -e
+
+# =========================================================================
+# 1. 设置和加载默认配置
+# =========================================================================
+
+# 首先，加载 config.sh 中的默认值
+source "$(dirname "${BASH_SOURCE[0]}")/../config.sh" || echo "Warning: config.sh not found or has errors, proceeding with script defaults."
+
+# 然后，设置此脚本自身的默认值
 use_cot=1
-if [ $use_cot -eq 1 ]; then
-    echo "Using CoT inference"
+gpu_id=0
+
+# =========================================================================
+# 2. 解析命令行参数 (覆盖默认值)
+# =========================================================================
+
+# 帮助函数
+usage() {
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  -k, --ckpt-path <path>     Path to the model checkpoint. Overrides the one in config.sh."
+    echo "                             (Default from config.sh: $CKPT_PATH)"
+    echo "  -g, --gpu-id <id>          Specify the GPU ID to use. (Default: $gpu_id)"
+    echo "  -i, --run-id <id>          Manually specify a run ID. Overrides the auto-generated one."
+    echo "  -c, --use-cot <0|1>        Whether to use Chain of Thought. 1 for yes, 0 for no. (Default: $use_cot)"
+    echo "  -p, --port <port>          Specify the VLLM inference port. (Default from config.sh: $VLLM_INFERENCE_PORT)"
+    echo "  -h, --help                 Display this help message."
+    echo ""
+    echo "Example: $0 --ckpt-path /path/to/new/model --gpu-id 1 --use-cot 0"
+}
+
+# 创建一个临时变量来判断 run-id 是否被手动设置
+manual_run_id_provided=0
+
+# 解析循环
+while [[ $# -gt 0 ]]; do
+    key="$1"
+    case $key in
+        -k|--ckpt-path)
+        CKPT_PATH="$2"
+        shift 2
+        ;;
+        -g|--gpu-id)
+        gpu_id="$2"
+        shift 2
+        ;;
+        -i|--run-id)
+        INFERENCE_RUN_ID="$2"
+        manual_run_id_provided=1 # 标记 run-id 是手动指定的
+        shift 2
+        ;;
+        -c|--use-cot)
+        use_cot="$2"
+        shift 2
+        ;;
+        -p|--port)
+        VLLM_INFERENCE_PORT="$2"
+        shift 2
+        ;;
+        -h|--help)
+        usage
+        exit 0
+        ;;
+        *)    # 未知选项
+        echo "Unknown option: $1"
+        usage
+        exit 1
+        ;;
+    esac
+done
+
+# =========================================================================
+# 3. Finalize Configuration and Environment
+# =========================================================================
+
+# 核心逻辑：如果 run-id 不是手动指定的，就根据最终的 CKPT_PATH 重新生成它
+if [ "$manual_run_id_provided" -eq 0 ]; then
+    if [ -z "$CKPT_PATH" ]; then
+        echo "Error: CKPT_PATH is not set. Please set it in config.sh or provide it with --ckpt-path."
+        exit 1
+    fi
+    # 从最终的 CKPT_PATH 重新计算 CKPT_NAME 和 INFERENCE_RUN_ID
+    echo "Generating INFERENCE_RUN_ID based on CKPT_PATH..."
+    CKPT_NAME=$(basename "$CKPT_PATH")
+    INFERENCE_RUN_ID="${CKPT_NAME}_$(date +"%Y%m%d_%H")"
+fi
+
+# 根据最终的 gpu_id 设置 CUDA_VISIBLE_DEVICES
+export CUDA_VISIBLE_DEVICES=$gpu_id
+
+# 根据最终的 use_cot 值设置 prompt
+if [ "$use_cot" -eq 1 ]; then
+    cot_prompt_settings="Using CoT inference"
     pre_prompt="You FIRST think about the reasoning process as an internal monologue and then provide the final answer.\n The reasoning process MUST BE enclosed within <think> </think> tags. The final answer MUST BE put within <answer> </answer> tags."
     cot_suffix="_cot"
 else
-    echo "Not using CoT inference"
+    cot_prompt_settings="Not using CoT inference"
     pre_prompt=""
     cot_suffix=""
 fi
 
+# 打印最终生效的配置
+echo "================================================="
+echo "Final Configuration for RealWorldQA Run:"
+echo "-------------------------------------------------"
+echo "GPU ID in use (CUDA_VISIBLE_DEVICES): $CUDA_VISIBLE_DEVICES"
+echo "Model Checkpoint Path: $CKPT_PATH"
+echo "Inference Run ID: $INFERENCE_RUN_ID"
+echo "VLLM Inference Port: $VLLM_INFERENCE_PORT"
+echo "CoT Setting: $cot_prompt_settings"
+echo "================================================="
+
+
+# =========================================================================
+# 4. 主逻辑 (使用最终确定的变量值)
+# =========================================================================
 
 run_realworldqa() {
     local PORT="${1:-$VLLM_INFERENCE_PORT}"
-    local GPU_ID="$2"
     local LOG_DIR="$BASE_DIR/logs/$INFERENCE_RUN_ID"
     mkdir -p "$LOG_DIR"
     
@@ -39,7 +144,7 @@ run_realworldqa() {
         --sample_ratio 1.0 > "$LOG_DIR/realworldqa_preprocess.log" 2>&1
     
     echo "Generating Responses for RealWorldQA..."
-    CUDA_VISIBLE_DEVICES=$GPU_ID python inference.py \
+    CUDA_VISIBLE_DEVICES=$gpu_id python inference.py \
         --model_name_or_path "$CKPT_PATH" \
         --input_file "data/RealWorldQA.json" \
         --use_cot $use_cot \
@@ -56,13 +161,12 @@ run_realworldqa() {
         --api_key "$CUSTOMIZED_REMOTE_OPENAI_API_KEY" \
         --output_file "data/RealWorldQA_judged_$INFERENCE_RUN_ID$cot_suffix.jsonl" > "$LOG_DIR/realworldqa_judge$cot_suffix.log" 2>&1
     
-    echo "RealWorldQA evaluation completed. Results in: $BASE_DIR/realworldqa/data/RealWorldQA_judged_$INFERENCE_RUN_ID.jsonl"
-    echo "RealWorldQA DONE" > "$LOG_DIR/realworldqa_done.flag"
+    echo "RealWorldQA evaluation completed. Results in: $BASE_DIR/realworldqa/data/RealWorldQA_judged_$INFERENCE_RUN_ID$cot_suffix.jsonl"
+    echo "RealWorldQA DONE" > "$LOG_DIR/realworldqa_done$cot_suffix.flag"
 }
 
 # Run the benchmark if this script is executed directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    PORT="$1"
-    GPU_ID="$2"  # 接收 GPU ID 参数
-    run_realworldqa "$PORT" "$GPU_ID"
+    # 直接调用函数，不再需要传递任何参数
+    run_realworldqa
 fi
