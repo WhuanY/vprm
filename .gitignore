@@ -1,5 +1,9 @@
 # Ignore all files in any images directory (but keep the directory structure)
+*.pyc
 **/images/*
+
+*/__pycache__/**
+
 
 # Ignore all log files everywhere
 *.log
@@ -46,3 +50,6 @@ BLINK_Benchmark/eval/saved_test_predictions
 BLINK_Benchmark/eval/val_predictions
 MathVista/results/
 MathVision/outputs/
+
+
+results/

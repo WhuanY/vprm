@@ -169,7 +169,7 @@ check_chartqa() {
 
     mkdir -p $CHARTQA_DIR/data
 
-    if [ ! -f "$CHARTQA_DIR/data/test-00000-of-00001-e2cd0b7a0f9eb20d.parquet"]; then 
+    if [ ! -f "$CHARTQA_DIR/data/test-00000-of-00001-e2cd0b7a0f9eb20d.parquet" ]; then 
         echo "ChartQA test data not found. Please download it via:"
         echo "wget -O $CHARTQA_DIR/data/test-00000-of-00001-e2cd0b7a0f9eb20d.parquet https://huggingface.co/datasets/AI4Math/ChartQA/resolve/main/data/test-00000-of-00001-e2cd0b7a0f9eb20d.parquet"
         return 1

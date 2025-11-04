@@ -85,16 +85,14 @@ done
 # 3. Finalize Configuration and Environment
 # =========================================================================
 
-# 核心逻辑：如果 run-id 不是手动指定的，就根据最终的 CKPT_PATH 重新生成它
+# 核心逻辑：如果 run-id 不是手动指定的，config.sh 会处理
 if [ "$manual_run_id_provided" -eq 0 ]; then
     if [ -z "$CKPT_PATH" ]; then
         echo "Error: CKPT_PATH is not set. Please set it in config.sh or provide it with --ckpt-path."
         exit 1
     fi
-    # 从最终的 CKPT_PATH 重新计算 CKPT_NAME 和 INFERENCE_RUN_ID
-    echo "Generating INFERENCE_RUN_ID based on CKPT_PATH..."
-    CKPT_NAME=$(basename "$CKPT_PATH")
-    INFERENCE_RUN_ID="${CKPT_NAME}_$(date +"%Y%m%d_%H")"
+    # Re-source config.sh to regenerate UNIFIED_RESULT_BASE with potentially updated CKPT_PATH
+    source "$(dirname "${BASH_SOURCE[0]}")/../config.sh"
 fi
 
 # 根据最终的 gpu_id 设置 CUDA_VISIBLE_DEVICES
@@ -111,6 +109,9 @@ else
     cot_suffix=""
 fi
 
+# 确保统一输出目录存在
+mkdir -p "$UNIFIED_RESULT_BASE"
+
 # 打印最终生效的配置
 echo "================================================="
 echo "Final Configuration for ChartQA Run:"
@@ -118,6 +119,7 @@ echo "-------------------------------------------------"
 echo "GPU ID in use (CUDA_VISIBLE_DEVICES): $CUDA_VISIBLE_DEVICES"
 echo "Model Checkpoint Path: $CKPT_PATH"
 echo "Inference Run ID: $INFERENCE_RUN_ID"
+echo "Unified Result Base: $UNIFIED_RESULT_BASE"
 echo "VLLM Inference Port: $VLLM_INFERENCE_PORT"
 echo "CoT Setting: $cot_prompt_settings"
 echo "Dataset Split: $split"
@@ -130,7 +132,7 @@ echo "================================================="
 
 run_chartqa() {
     local PORT="${1:-$VLLM_INFERENCE_PORT}"
-    local LOG_DIR="$BASE_DIR/logs/$INFERENCE_RUN_ID"
+    local LOG_DIR="$UNIFIED_RESULT_BASE"
     mkdir -p "$LOG_DIR"
 
     echo "=============================="
@@ -153,18 +155,18 @@ run_chartqa() {
     --pre_prompt "$pre_prompt" \
     --use_cot $use_cot \
     --input_file "data/chartQA_${split}.json" \
-    --save_name "data/chartQA_${split}_inferenced_${INFERENCE_RUN_ID}${cot_suffix}.jsonl" \
+    --save_name "$UNIFIED_RESULT_BASE/chartqa_${split}_inferenced${cot_suffix}.jsonl" \
     --tp 1 \
     --bz 1 \
-    --max_new_tokens 8000 > "$LOG_DIR/chartQA_${split}_inferenced_${INFERENCE_RUN_ID}${cot_suffix}.log" 2>&1
+    --max_new_tokens 8000 > "$LOG_DIR/chartQA_${split}_inferenced${cot_suffix}.log" 2>&1
 
     echo "Calculating scores for ChartQA..."
     python judge.py \
-        --input_file "data/chartQA_${split}_inferenced_${INFERENCE_RUN_ID}${cot_suffix}.jsonl" \
+        --input_file "$UNIFIED_RESULT_BASE/chartqa_${split}_inferenced${cot_suffix}.jsonl" \
         --judge_api "$CUSTOMIZED_REMOTE_OPENAI_API_ENDPOINT" \
         --api_key "$CUSTOMIZED_REMOTE_OPENAI_API_KEY" \
         --use_relax_accuracy \
-        --output_file "data/chartQA_${split}_judged_${INFERENCE_RUN_ID}${cot_suffix}.jsonl" > "$LOG_DIR/chartqa_judge${cot_suffix}.log" 2>&1
+        --output_file "$UNIFIED_RESULT_BASE/chartqa_${split}_judged${cot_suffix}.jsonl" > "$LOG_DIR/chartqa_judge${cot_suffix}.log" 2>&1
     
     echo "ChartQA evaluation completed."
     echo "Logs are in: $LOG_DIR"

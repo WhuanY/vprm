@@ -7,6 +7,13 @@ set -e
 # 1. 设置和加载默认配置
 # =========================================================================
 
+# Generate shared timestamp BEFORE sourcing config.sh
+# This ensures all benchmark scripts use the same timestamp
+if [ -z "$SHARED_TIMESTAMP" ]; then
+    export SHARED_TIMESTAMP=$(date +"%Y%m%d_%H%M")
+    echo "Generated shared timestamp: $SHARED_TIMESTAMP"
+fi
+
 # Source configuration
 source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 
@@ -69,10 +76,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# 如果 CKPT_PATH 被修改，重新生成 INFERENCE_RUN_ID
+# 如果 CKPT_PATH 被修改，重新解析路径并生成统一目录
+# Note: config.sh will handle the parsing and UNIFIED_RESULT_BASE generation
+# when it's sourced. We just need to ensure CKPT_PATH is set before sourcing.
+# Since we already sourced config.sh above, we need to re-source it if CKPT_PATH changed
 if [ -n "$CKPT_PATH" ]; then
-    CKPT_NAME=$(basename "$CKPT_PATH")
-    INFERENCE_RUN_ID="${CKPT_NAME}_$(date +"%Y%m%d_%H")"
+    # Re-source config.sh to regenerate UNIFIED_RESULT_BASE with new CKPT_PATH
+    source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 fi
 
 # 处理选择的benchmarks

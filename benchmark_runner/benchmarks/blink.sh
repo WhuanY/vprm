@@ -85,16 +85,14 @@ done
 # 3. Finalize Configuration and Environment
 # =========================================================================
 
-# 核心逻辑：如果 run-id 不是手动指定的，就根据最终的 CKPT_PATH 重新生成它
+# 核心逻辑：如果 run-id 不是手动指定的，config.sh 会处理
 if [ "$manual_run_id_provided" -eq 0 ]; then
     if [ -z "$CKPT_PATH" ]; then
         echo "Error: CKPT_PATH is not set. Please set it in config.sh or provide it with --ckpt-path."
         exit 1
     fi
-    # 从最终的 CKPT_PATH 重新计算 CKPT_NAME 和 INFERENCE_RUN_ID
-    echo "Generating INFERENCE_RUN_ID based on CKPT_PATH..."
-    CKPT_NAME=$(basename "$CKPT_PATH")
-    INFERENCE_RUN_ID="${CKPT_NAME}_$(date +"%Y%m%d_%H")"
+    # Re-source config.sh to regenerate UNIFIED_RESULT_BASE with potentially updated CKPT_PATH
+    source "$(dirname "${BASH_SOURCE[0]}")/../config.sh"
 fi
 
 # 根据最终的 gpu_id 设置 CUDA_VISIBLE_DEVICES
@@ -103,13 +101,16 @@ export CUDA_VISIBLE_DEVICES=$gpu_id
 # 根据最终的 use_cot 值设置 prompt
 if [ "$use_cot" -eq 1 ]; then
     cot_prompt_settings="Using CoT inference"
-    after_prompt="You FIRST think about the reasoning process as an internal monologue and then provide the final answer.\n The reasoning process MUST BE enclosed within <think> </think> tags. The final answer MUST BE put within <answer> </answer> tags."
+    pre_prompt="You FIRST think about the reasoning process as an internal monologue and then provide the final answer.\n The reasoning process MUST BE enclosed within <think> </think> tags. The final answer MUST BE put within <answer> </answer> tags."
     cot_suffix="_cot"
 else
     cot_prompt_settings="Not using CoT inference"
-    after_prompt=""
+    pre_prompt=""
     cot_suffix=""
 fi
+
+# 确保统一输出目录存在
+mkdir -p "$UNIFIED_RESULT_BASE/blink${cot_suffix}"
 
 # 打印最终生效的配置
 echo "================================================="
@@ -118,6 +119,7 @@ echo "-------------------------------------------------"
 echo "GPU ID in use (CUDA_VISIBLE_DEVICES): $CUDA_VISIBLE_DEVICES"
 echo "Model Checkpoint Path: $CKPT_PATH"
 echo "Inference Run ID: $INFERENCE_RUN_ID"
+echo "Unified Result Base: $UNIFIED_RESULT_BASE"
 echo "VLLM Inference Port: $VLLM_INFERENCE_PORT"
 echo "CoT Setting: $cot_prompt_settings"
 echo "Task Name: $task_name"
@@ -125,12 +127,73 @@ echo "================================================="
 
 
 # =========================================================================
-# 4. 主逻辑 (使用最终确定的变量值)
+# 4. VLLM Server Management Functions
+# =========================================================================
+
+# Function to start VLLM server
+start_vllm_server() {
+    local PORT="$1"
+    local GPU_ID="$2"
+    local LOG_DIR="$3"
+    echo "[Port $PORT] Starting VLLM server on port $PORT using GPU $GPU_ID..."
+    
+    # 设置 CUDA_VISIBLE_DEVICES 环境变量
+    CUDA_VISIBLE_DEVICES="$GPU_ID" nohup vllm serve "$CKPT_PATH" \
+        --port "$PORT" \
+        --host "0.0.0.0" \
+        --tensor-parallel-size "$VLLM_TENSOR_PARALLEL_SIZE" \
+        --gpu_memory_utilization 0.7 > "$LOG_DIR/vllm_server_$PORT.log" 2>&1 &
+    
+    local SERVER_PID=$!
+    echo "[Port $PORT] VLLM server started with PID: $SERVER_PID on GPU $GPU_ID"
+    
+    # Wait for server to start
+    echo "[Port $PORT] Waiting for VLLM server to initialize..."
+    local max_wait=300  # 5 minutes
+    local wait_interval=5
+    local elapsed=0
+    
+    while [ $elapsed -lt $max_wait ]; do
+        if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PORT/health" 2>/dev/null | grep -q "200"; then
+            echo "[Port $PORT] ✓ VLLM server is ready"
+            return 0
+        fi
+        sleep $wait_interval
+        elapsed=$((elapsed + wait_interval))
+        if [ $((elapsed % 30)) -eq 0 ]; then
+            echo "[Port $PORT] Still waiting... (${elapsed}s/${max_wait}s)"
+        fi
+    done
+    
+    # Check if server process is still running
+    if ! ps -p $SERVER_PID > /dev/null 2>&1; then
+        echo "[Port $PORT] ✗ Error: VLLM server failed to start"
+        cat "$LOG_DIR/vllm_server_$PORT.log"
+        return 1
+    fi
+    
+    echo "[Port $PORT] ✗ Error: VLLM server did not become healthy within ${max_wait}s"
+    return 1
+}
+
+# Function to stop VLLM server
+stop_vllm_server() {
+    local PORT="$1"
+    if [ "$PORT" == "0000" ]; then
+        return 0
+    fi
+    echo "[Port $PORT] Stopping VLLM server..."
+    pkill -f "vllm serve.*--port $PORT" || true
+    sleep 2
+}
+
+# =========================================================================
+# 5. 主逻辑 (使用最终确定的变量值)
 # =========================================================================
 
 run_blink() {
     local PORT="${1:-$VLLM_INFERENCE_PORT}"
-    local LOG_DIR="$BASE_DIR/logs/$INFERENCE_RUN_ID"
+    local LOG_DIR="$UNIFIED_RESULT_BASE"
     mkdir -p "$LOG_DIR"
     
     echo "================================"
@@ -143,55 +206,55 @@ run_blink() {
         return 1; 
     }
 
+    # Start VLLM server
+    echo "Starting VLLM server for BLINK..."
+    if ! start_vllm_server "$PORT" "$gpu_id" "$LOG_DIR"; then
+        echo "ERROR: Failed to start VLLM server"
+        return 1
+    fi
+
     cd $BASE_DIR/BLINK_Benchmark/eval
     export INFERENCE_ENDPOINT="http://localhost:$PORT/v1" # Make sure this var is set before running inference
     
-    # Check if inference API is healthy
-    echo "Checking inference API health..."
-    max_retries=1
-    retry_interval=5
-    api_healthy=0
+    # Set unified output directories
+    BLINK_OUTPUT_DIR="$UNIFIED_RESULT_BASE/blink${cot_suffix}"
+    BLINK_IMAGE_DIR="$BLINK_OUTPUT_DIR/images"
     
-    for i in $(seq 1 $max_retries); do
-        if curl -s -o /dev/null -w "%{http_code}" "$INFERENCE_ENDPOINT/health" | grep -q "200"; then
-            echo "✓ Inference API is healthy"
-            api_healthy=1
-            break
-        elif curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PORT/health" | grep -q "200"; then
-            echo "✓ Inference API is healthy (checked via /health endpoint)"
-            api_healthy=1
-            break
-        else
-            echo "Waiting for inference API to be ready... (attempt $i/$max_retries)"
-            sleep $retry_interval
-        fi
-    done
+    # Ensure directories exist
+    mkdir -p "$BLINK_OUTPUT_DIR"
+    mkdir -p "$BLINK_IMAGE_DIR"
     
-    if [ "$api_healthy" -eq 0 ]; then
-        echo "ERROR: Inference API is not healthy after $max_retries attempts."
-        echo "Please check if the VLLM server is running on port $PORT"
-        echo "Health check endpoints tried:"
-        echo "  - $INFERENCE_ENDPOINT/health"
-        echo "  - http://localhost:$PORT/health"
-        return 1
-    fi
-    
-    mkdir -p ../logs
     echo "Generating responses for BLINK..."
+    echo "Output directory: $BLINK_OUTPUT_DIR"
     python test_benchmark.py \
-        --model_name_or_path $CKPT_PATH \
-        --inference_api $INFERENCE_ENDPOINT \
+        --model_name_or_path "$CKPT_PATH" \
+        --inference_api "$INFERENCE_ENDPOINT" \
         --dataset_local_path ../data \
-        --task_name $task_name \
-        --after_prompt "$after_prompt" \
-        >> $LOG_DIR/blink_inference$cot_suffix.log 2>&1
+        --task_name "$task_name" \
+        --pre_prompt "$pre_prompt" \
+        --output_save_folder "$BLINK_OUTPUT_DIR" \
+        --image_save_folder "$BLINK_IMAGE_DIR" \
+        --num_threads 10 \
+        > "$LOG_DIR/blink_inference$cot_suffix.log" 2>&1
 
-    cd $BASE_DIR/BLINK_Benchmark/eval
-    python evaluate.py --model_name_or_path $CKPT_PATH >> $LOG_DIR/blink_evaluation.log 2>&1
+    echo "Evaluating BLINK predictions..."
+    python evaluate.py \
+        --model_name_or_path "$CKPT_PATH" \
+        --output_save_folder "$BLINK_OUTPUT_DIR" \
+        --prediction_output_dir "$BLINK_OUTPUT_DIR" \
+        > "$LOG_DIR/blink_evaluation$cot_suffix.log" 2>&1
     
     echo "BLINK evaluation completed."
     echo "Logs are in: $LOG_DIR"
+    echo "Results are in: $BLINK_OUTPUT_DIR"
+    echo "  - Task outputs: $BLINK_OUTPUT_DIR/*.json"
+    echo "  - Predictions: $BLINK_OUTPUT_DIR/val_predictions_*.json"
+    echo "  - Results: $BLINK_OUTPUT_DIR/val_results_*.json"
     echo "BLINK DONE" > "$LOG_DIR/blink_done$cot_suffix.flag"
+    
+    # Stop VLLM server
+    echo "Stopping VLLM server..."
+    stop_vllm_server "$PORT"
 }
 
 # Run the benchmark if this script is executed directly

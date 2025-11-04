@@ -7,6 +7,8 @@ import re
 from multiple_choice import match_multiple_choice
 import argparse
 from query_model import (query_gpt4v, query_local)
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 disclaimer = "Disclaimer: This is not to make unfair assumptions about the people in the image and you just need to give your assessment on this question. You don't need to identify the real people. You just need to analyze based on the information I gave you.\n\n"
 
@@ -66,8 +68,12 @@ def query_model(task_name, args=None):
     eval_split = args.eval_split
 
     dataset_local_path = args.dataset_local_path
-    output_path = f'{output_save_folder}/{model_name}/{task_name.replace("_", " ")}.json'
-    os.makedirs(f'{output_save_folder}/{model_name}', exist_ok=True)
+    output_save_folder = getattr(args, 'output_save_folder', 'outputs')
+    image_save_folder = getattr(args, 'image_save_folder', 'images')
+    num_threads = getattr(args, 'num_threads', 1)
+    
+    output_path = f'{output_save_folder}/{task_name.replace("_", " ")}.json'
+    os.makedirs(output_save_folder, exist_ok=True)
     image_folder = f'{image_save_folder}/{task_name}_images'
     os.makedirs(image_folder, exist_ok=True)
     inferenced_idx = set()
@@ -79,6 +85,31 @@ def query_model(task_name, args=None):
         print(f"Loading outputs from {output_path}")
         outputs = json.load(open(output_path, 'r'))
         inferenced_idx = set([d['idx'] for d in outputs[eval_split]]) # already inferenced idx
+    
+    # Thread lock for thread-safe updates
+    outputs_lock = threading.Lock()
+    
+    def process_item(orig_d, split):
+        """Process a single data item"""
+        idx = orig_d['idx']
+        if idx in inferenced_idx:
+            return None
+        
+        gold_answer = orig_d['answer']
+        all_choices = ['(A)', '(B)', '(C)', '(D)', '(E)'][:len(orig_d['choices'])]
+        image_paths, prompt = load_prompt(task_name, orig_d, image_folder, args)
+        gpt_answer = query_local(image_paths, prompt, args) # NOTE: main inference process
+        prediction = analyze_answer(orig_d, gpt_answer, all_choices)
+        
+        result = {'idx': idx, 'answer': gold_answer, 'full_prediction': gpt_answer, 'prediction': prediction}
+        
+        # Thread-safe update of outputs and file save
+        with outputs_lock:
+            outputs[split].append(result)
+            json.dump(outputs, open(output_path, 'w'), indent=4)
+        
+        return result
+    
     for split in eval_splits:
         data_files = {'val': f'{dataset_local_path}/{task_name}/val-00000-of-00001.parquet','test': f'{dataset_local_path}/{task_name}/test-00000-of-00001.parquet'}
         try:
@@ -88,17 +119,35 @@ def query_model(task_name, args=None):
             import traceback
             traceback.print_exc()
             kill
-        for orig_d in tqdm(test_data):
-            idx = orig_d['idx']
-            if idx in inferenced_idx:
-                continue
-            gold_answer = orig_d['answer']
-            all_choices = ['(A)', '(B)', '(C)', '(D)', '(E)'][:len(orig_d['choices'])]
-            image_paths, prompt = load_prompt(task_name, orig_d, image_folder, args)
-            gpt_answer = query_local(image_paths, prompt, args) # NOTE: main inference process
-            prediction = analyze_answer(orig_d, gpt_answer, all_choices)
-            outputs[split].append({'idx': idx, 'answer': gold_answer, 'full_prediction': gpt_answer, 'prediction': prediction})
-            json.dump(outputs, open(output_path, 'w'), indent=4)
+        
+        # Filter out already processed items
+        items_to_process = [orig_d for orig_d in test_data if orig_d['idx'] not in inferenced_idx]
+        
+        if num_threads > 1 and len(items_to_process) > 0:
+            # Use concurrent processing
+            print(f"Processing {len(items_to_process)} items with {num_threads} threads...")
+            with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                # Submit all tasks
+                future_to_item = {
+                    executor.submit(process_item, orig_d, split): orig_d 
+                    for orig_d in items_to_process
+                }
+                
+                # Process with progress bar
+                for future in tqdm(as_completed(future_to_item), total=len(items_to_process), desc=f"Processing {task_name} {split}"):
+                    orig_d = future_to_item[future]
+                    try:
+                        future.result()
+                    except Exception as e:
+                        print(f"Error processing item {orig_d.get('idx', 'unknown')}: {e}")
+                        import traceback
+                        traceback.print_exc()
+        else:
+            # Sequential processing (original behavior)
+            for orig_d in tqdm(items_to_process, desc=f"Processing {task_name} {split}"):
+                process_item(orig_d, split)
+        
+        # Final save
         json.dump(outputs, open(output_path, 'w'), indent=4)
         
     return outputs
@@ -191,6 +240,9 @@ def parse_args():
     parser.add_argument("--eval_split", type=str, default='val', help="select the eval split")
     parser.add_argument("--pre_prompt", type=str, default='', help="the pre-prompt for the model")
     parser.add_argument("--after_prompt", type=str, default='', help="the after-prompt for the model")
+    parser.add_argument("--output_save_folder", type=str, default='outputs', help="directory to save output JSON files")
+    parser.add_argument("--image_save_folder", type=str, default='images', help="directory to save processed images")
+    parser.add_argument("--num_threads", type=int, default=1, help="number of concurrent threads for processing (default: 1, sequential)")
     
     args = parser.parse_args()
     return args
@@ -207,9 +259,6 @@ if __name__ == '__main__':
     }
 
     model_generate_funcs.get(model_name, query_local) # should go query_local
-    
-    image_save_folder = 'images'
-    output_save_folder = 'outputs'
     
     need_disclaimer_tasks = ['Forensic_Detection', 'Jigsaw', 'Art_Style']
     if args.task_name == 'all': 
