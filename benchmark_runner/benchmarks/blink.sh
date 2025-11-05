@@ -234,7 +234,8 @@ run_blink() {
         --pre_prompt "$pre_prompt" \
         --output_save_folder "$BLINK_OUTPUT_DIR" \
         --image_save_folder "$BLINK_IMAGE_DIR" \
-        --num_threads 10 \
+        --num_threads 50 \
+        --regen \
         > "$LOG_DIR/blink_inference$cot_suffix.log" 2>&1
 
     echo "Evaluating BLINK predictions..."

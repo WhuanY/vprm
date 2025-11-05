@@ -122,7 +122,7 @@ if __name__ == '__main__':
     
     subtasks = [
         'Visual_Similarity', 'Counting', 'Relative_Depth', 'Jigsaw', 'Art_Style', 'Functional_Correspondence', 'Semantic_Correspondence', 'Spatial_Relation', 'Object_Localization', 'Visual_Correspondence', 'Multi-view_Reasoning', 
-        # 'Relative_Reflectance', # 这个数据集有点问题
+        'Relative_Reflectance', 
         'Forensic_Detection', 'IQ_Test'
     ]
     model_name = os.path.basename(arg.model_name_or_path)

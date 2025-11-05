@@ -9,6 +9,88 @@ import argparse
 from query_model import (query_gpt4v, query_local)
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+import hashlib
+
+import pandas as pd
+from PIL import Image
+import io
+
+def load_relative_reflectance_data(data_files):
+    """
+    Load Relative_Reflectance dataset from parquet files using pandas,
+    bypassing HuggingFace datasets library to avoid schema compatibility issues.
+    
+    Parameters:
+    - data_files: dict with 'val' and 'test' keys pointing to parquet file paths
+    
+    Returns:
+    - dict with 'val' and 'test' keys, each containing a list of data records
+    """
+    def convert_image_field(image_data):
+        """Convert image data to PIL Image object"""
+        if image_data is None:
+            return None
+        if isinstance(image_data, Image.Image):
+            # Already a PIL Image
+            return image_data
+        elif isinstance(image_data, bytes):
+            # Raw bytes, convert to PIL Image
+            try:
+                return Image.open(io.BytesIO(image_data))
+            except Exception as e:
+                print(f"Warning: Failed to convert image bytes to PIL Image: {e}")
+                return None
+        elif isinstance(image_data, dict):
+            # Dictionary format, check for 'bytes' key
+            if 'bytes' in image_data:
+                try:
+                    return Image.open(io.BytesIO(image_data['bytes']))
+                except Exception as e:
+                    print(f"Warning: Failed to convert image dict to PIL Image: {e}")
+                    return None
+            # Might have other formats, try to extract image
+            return None
+        else:
+            # Unknown format
+            return None
+    
+    def load_split(file_path):
+        """Load a single split from parquet file"""
+        if not os.path.exists(file_path):
+            print(f"Warning: File {file_path} does not exist, returning empty list")
+            return []
+        
+        try:
+            # Read parquet file using pandas
+            df = pd.read_parquet(file_path)
+            
+            # Convert to list of dictionaries
+            records = []
+            for idx, row in df.iterrows():
+                record = row.to_dict()
+                
+                # Convert image fields to PIL Image objects
+                for img_key in ['image_1', 'image_2', 'image_3', 'image_4']:
+                    if img_key in record:
+                        record[img_key] = convert_image_field(record[img_key])
+                
+                records.append(record)
+            
+            return records
+        except Exception as e:
+            print(f"Error loading {file_path}: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
+    result = {
+        "val": load_split(data_files.get('val', '')),
+        "test": load_split(data_files.get('test', ''))
+    }
+    
+    # print(f"Loaded {len(result['val'])} val records and {len(result['test'])} test records")
+    
+    return result
 
 disclaimer = "Disclaimer: This is not to make unfair assumptions about the people in the image and you just need to give your assessment on this question. You don't need to identify the real people. You just need to analyze based on the information I gave you.\n\n"
 
@@ -49,9 +131,8 @@ def analyze_answer(d, gpt_answer, all_choices):
             prediction = intersect[0]
         return prediction
     except Exception as e:
-        pass
-        print(gpt_answer, e)
-        kill
+        print(f"Error in analyze_answer: {gpt_answer}, {e}")
+        return None
 
 
 def query_model(task_name, args=None):
@@ -78,7 +159,12 @@ def query_model(task_name, args=None):
     os.makedirs(image_folder, exist_ok=True)
     inferenced_idx = set()
     eval_splits = ['val'] if eval_split == 'val' else ['test'] if eval_split == 'test' else ['val', 'test']
-    if not os.path.exists(output_path):
+    
+    # If regen is True, clear existing outputs and start fresh
+    if args.regen:
+        outputs = {'val': [], 'test': []}
+        print(f"Regenerating {task_name} on {eval_splits} set (clearing existing outputs)")
+    elif not os.path.exists(output_path):
         outputs = {'val': [], 'test': []}
         print(f"Evaluating {task_name} on {eval_splits} set")
     else:
@@ -92,7 +178,8 @@ def query_model(task_name, args=None):
     def process_item(orig_d, split):
         """Process a single data item"""
         idx = orig_d['idx']
-        if idx in inferenced_idx:
+        # Skip if already processed (unless regen is True)
+        if not args.regen and idx in inferenced_idx:
             return None
         
         gold_answer = orig_d['answer']
@@ -101,7 +188,7 @@ def query_model(task_name, args=None):
         gpt_answer = query_local(image_paths, prompt, args) # NOTE: main inference process
         prediction = analyze_answer(orig_d, gpt_answer, all_choices)
         
-        result = {'idx': idx, 'answer': gold_answer, 'full_prediction': gpt_answer, 'prediction': prediction}
+        result = {'idx': idx, 'answer': gold_answer, 'full_prediction': gpt_answer, 'prediction': prediction, 'prompt': prompt}
         
         # Thread-safe update of outputs and file save
         with outputs_lock:
@@ -112,16 +199,17 @@ def query_model(task_name, args=None):
     
     for split in eval_splits:
         data_files = {'val': f'{dataset_local_path}/{task_name}/val-00000-of-00001.parquet','test': f'{dataset_local_path}/{task_name}/test-00000-of-00001.parquet'}
-        try:
+        
+        if task_name == 'Relative_Reflectance': # 这个数据集有点问题，需要单独处理
+            test_data = load_relative_reflectance_data(data_files)[split]
+        else:
             test_data = load_dataset('parquet', data_files=data_files)[split]
-        except:
-            print(f"ERROR in loading dataset: {task_name}")
-            import traceback
-            traceback.print_exc()
-            kill
         
         # Filter out already processed items
-        items_to_process = [orig_d for orig_d in test_data if orig_d['idx'] not in inferenced_idx]
+        if args.regen:
+            items_to_process = [orig_d for orig_d in test_data]
+        else:
+            items_to_process = [orig_d for orig_d in test_data if orig_d['idx'] not in inferenced_idx]
         
         if num_threads > 1 and len(items_to_process) > 0:
             # Use concurrent processing
@@ -151,6 +239,80 @@ def query_model(task_name, args=None):
         json.dump(outputs, open(output_path, 'w'), indent=4)
         
     return outputs
+
+
+def rescale_img(img, tgt=None):
+    """
+    Rescale image to target size while maintaining aspect ratio.
+    
+    Parameters:
+    - img: PIL Image object
+    - tgt: Tuple like (-1, 512) meaning height=512, width auto, or (512, -1) meaning width=512, height auto
+    
+    Returns:
+    - Rescaled PIL Image
+    """
+    assert isinstance(tgt, tuple) and -1 in tgt
+    w, h = img.size
+    if tgt[0] != -1:
+        new_w, new_h = tgt[0], int(tgt[0] / w * h)
+    elif tgt[1] != -1:
+        new_w, new_h = int(tgt[1] / h * w), tgt[1]
+    img = img.resize((new_w, new_h))
+    return img
+
+
+def concat_images_vlmeval(image_list, target_size=512, mode='h', save_path=None):
+    """
+    Concatenate multiple PIL Images horizontally (or vertically) with optional resizing.
+    Aligned with VLMEvalKit's implementation for BLINK benchmark.
+    
+    Parameters:
+    - image_list: List of PIL Image objects
+    - target_size: Target size for resizing (height if mode='h', width if mode='v'). Use -1 to skip resizing.
+    - mode: 'h' for horizontal concatenation, 'v' for vertical
+    - save_path: Path to save the concatenated image. If None, generates a temporary path.
+    
+    Returns:
+    - Path to the saved concatenated image
+    """
+    if not image_list:
+        return None
+    
+    # Resize images if target_size is specified
+    ims = image_list.copy()
+    if target_size != -1:
+        ims = [
+            rescale_img(im, (-1, target_size) if mode == 'h' else (target_size, -1))
+            for im in ims
+        ]
+    
+    ws, hs = [x.width for x in ims], [x.height for x in ims]
+    
+    if mode == 'h':
+        new_w, new_h = sum(ws), max(hs)
+        dst = Image.new('RGB', (new_w, new_h))
+        x_offset = 0
+        for i, im in enumerate(ims):
+            dst.paste(im, (x_offset, 0))
+            x_offset += im.width
+    elif mode == 'v':
+        new_w, new_h = max(ws), sum(hs)
+        dst = Image.new('RGB', (new_w, new_h))
+        y_offset = 0
+        for i, im in enumerate(ims):
+            dst.paste(im, (0, y_offset))
+            y_offset += im.height
+    
+    # Generate save path if not provided
+    if save_path is None:
+        # Generate MD5 hash from image paths for uniqueness
+        image_str = '_'.join([str(id(img)) for img in image_list])
+        str_md5 = hashlib.md5(image_str.encode()).hexdigest()
+        save_path = os.path.join('/tmp', f'{str_md5}.jpg')
+    
+    dst.save(save_path)
+    return save_path
 
 
 def concat_images_horizontally_with_margin(image_filenames, output_filename, margin=10):
@@ -184,6 +346,11 @@ def concat_images_horizontally_with_margin(image_filenames, output_filename, mar
 def load_prompt(task_name, d, image_folder, args):
     """
     Loads the prompt and images from huggingface data entry, saves the images to a folder, and returns a list of image paths, and the prompt.
+    
+    For BLINK benchmark, aligns with VLMEvalKit preprocessing:
+    - Multiple images are concatenated horizontally
+    - Images are resized to height 512 (maintaining aspect ratio)
+    - Returns a single concatenated image path
 
     Parameters:
     - task_name: String, the name of the task.
@@ -192,19 +359,54 @@ def load_prompt(task_name, d, image_folder, args):
     - args: command line arguments. 
 
     Returns:
-    - image_paths: List of strings, the filepaths to the saved images.
+    - image_paths: List of strings, the filepaths to the saved images (single concatenated image for BLINK).
     - prompt: String, the prompt text.
-    - d: Dictionary, the data dictionary with the image paths removed.
     """
-    image_paths = []
+    # Collect all images
+    images = []
     for k in ['image_1', 'image_2', 'image_3', 'image_4']:
         if k in d and d[k]:
-            image = d[k]
-            image_path = f'{image_folder}/{d["idx"]}_{k[-1]}.jpg'
-            image.save(image_path)
-            image_paths.append(image_path)
+            images.append(d[k])
+    
+    if not images:
+        image_paths = []
+    elif len(images) > 1:
+        # For BLINK: concatenate multiple images (aligned with VLMEvalKit)
+        # Save concatenated image to image_folder
+        concat_path = os.path.join(image_folder, f'{d["idx"]}_concat.jpg')
+        concat_images_vlmeval(images, target_size=512, mode='h', save_path=concat_path)
+        image_paths = [concat_path]
+    else:
+        # Single image: save normally
+        image = images[0]
+        image_path = f'{image_folder}/{d["idx"]}_1.jpg'
+        image.save(image_path)
+        image_paths = [image_path]
 
-    prompt = d['prompt']
+
+    # process prompt
+    if 'question' in d.keys() and 'choices' in d.keys(): # VLMEvalKit format
+        question = d['question']
+        options = {}
+        for i, choice in enumerate(d.get('choices', [])):
+            if choice:  # 只添加非空的选项
+                options[chr(65 + i)] = choice  # A, B, C, D, E
+        
+        options_prompt = 'Options:\n'
+        for key, item in options.items():
+            options_prompt += f'{key}. {item}\n'
+        
+        hint = d.get('hint', None)
+        prompt = ''
+        if hint is not None and not pd.isna(hint):
+            prompt += f'Hint: {hint}\n'
+        prompt += f'Question: {question}\n'
+        if len(options):
+            prompt += options_prompt
+            prompt += 'Please select the correct answer from the options above. \n'
+    else:
+        prompt = d['prompt']
+    
     if args.pre_prompt:
         prompt = args.pre_prompt + "\n" + prompt
     if task_name in need_disclaimer_tasks:
@@ -217,12 +419,43 @@ def load_prompt(task_name, d, image_folder, args):
     return image_paths, prompt
 
 
+def normalize_answer(answer):
+    """
+    Normalize answer format to ensure consistent comparison.
+    Converts "A" -> "(A)", "(A)" -> "(A)", etc.
+    
+    Parameters:
+    - answer: String, the answer in various formats (e.g., "A", "(A)")
+    
+    Returns:
+    - String, normalized answer in format "(A)" or original if not a letter
+    """
+    if not answer:
+        return answer
+    
+    answer = str(answer).strip()
+    
+    # If it's already in format "(A)", return as is
+    if answer.startswith('(') and answer.endswith(')'):
+        return answer
+    
+    # If it's a single letter like "A", "B", "C", convert to "(A)", "(B)", "(C)"
+    if len(answer) == 1 and answer.isalpha() and answer.upper() in ['A', 'B', 'C', 'D', 'E']:
+        return f"({answer.upper()})"
+    
+    # Otherwise return original
+    return answer
+
+
 def eval_task(task_name, args):
     outputs = query_model(task_name, args)
     accu = {'val': 0, 'test': 0}
     for split in ['val', 'test']:
         for d in outputs[split]:
-            if d['answer'] == d['prediction']:
+            # Normalize both answer and prediction for consistent comparison
+            normalized_answer = normalize_answer(d['answer'])
+            normalized_prediction = normalize_answer(d['prediction'])
+            if normalized_answer == normalized_prediction:
                 accu[split] += 1
     
     print('-'*50)
@@ -243,6 +476,7 @@ def parse_args():
     parser.add_argument("--output_save_folder", type=str, default='outputs', help="directory to save output JSON files")
     parser.add_argument("--image_save_folder", type=str, default='images', help="directory to save processed images")
     parser.add_argument("--num_threads", type=int, default=1, help="number of concurrent threads for processing (default: 1, sequential)")
+    parser.add_argument("--regen", action='store_true', help="regenerate the outputs")
     
     args = parser.parse_args()
     return args
@@ -260,13 +494,12 @@ if __name__ == '__main__':
 
     model_generate_funcs.get(model_name, query_local) # should go query_local
     
-    need_disclaimer_tasks = ['Forensic_Detection', 'Jigsaw', 'Art_Style']
+    # need_disclaimer_tasks = ['Forensic_Detection', 'Jigsaw', 'Art_Style']
+    need_disclaimer_tasks = []
     if args.task_name == 'all': 
         subtasks = ['Art_Style', 'Functional_Correspondence', 'Multi-view_Reasoning', 
-                    #'Relative_Reflectance', # 这个数据集有点问题
-                      'Visual_Correspondence', 'Counting', 
-                      'IQ_Test',  
-                      'Object_Localization', 'Semantic_Correspondence', 'Visual_Similarity', 'Forensic_Detection', 'Jigsaw', 'Relative_Depth', 'Spatial_Relation']
+                    'Relative_Reflectance', 'Visual_Correspondence', 'Counting', 'IQ_Test',  
+                'Object_Localization', 'Semantic_Correspondence', 'Visual_Similarity', 'Forensic_Detection', 'Jigsaw', 'Relative_Depth', 'Spatial_Relation']
     else:
         subtasks = [args.task_name]
 
@@ -277,3 +510,8 @@ if __name__ == '__main__':
     # 退出脚本
     import sys
     sys.exit(0)
+# if __name__ == '__main__':
+#     load_relative_reflectance_data({
+#         "val": "data/Relative_Reflectance/val-00000-of-00001.parquet",
+#         "test": "data/Relative_Reflectance/test-00000-of-00001.parquet"
+#     })

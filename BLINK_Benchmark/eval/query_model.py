@@ -59,6 +59,8 @@ def query_gpt4v(image_paths, prompt, retry=10):
 def query_local(image_paths, prompt, args, retry=2):
     """
     Query the Qwen-VL model with the prompt and a list of image paths. The temperature is set to 0.0 and retry is set to 10 if fails as default setting.
+    
+    Aligned with VLMEvalKit: images come first, then text.
 
     Parameters:
     - image_path: String, the path to the image.
@@ -70,29 +72,30 @@ def query_local(image_paths, prompt, args, retry=2):
 
     for r in range(retry):
         try:
-            input_dicts = [{"type": "text", "text": prompt}]
+            # Aligned with VLMEvalKit: images first, then text
+            input_dicts = []
             for i, image in enumerate(base64_images):
                 input_dicts.append({"type": "image_url",
-                                    "image_url": {"url": f"data:image/jpeg;base64,{image}", "detail": "low"}})
+                                    "image_url": {"url": f"data:image/jpeg;base64,{image}"}})
+            
+            input_dicts.append({"type": "text", "text": prompt})
             response = client.chat.completions.create(
                 model=args.model_name_or_path,
                 messages=[
                     {
-                    "role": "user",
-                    "content": input_dicts,
+                        "role": "user",
+                        "content": input_dicts,
                     }
                 ],
                 max_tokens=8000,
                 n=1,
                 temperature=0.0,
             )
-            print(response)
             return response.choices[0].message.content
         except Exception as e:
             print(e)
             time.sleep(1)
     return 'Failed: Query Local Error'
-
 
 
 client = get_client()

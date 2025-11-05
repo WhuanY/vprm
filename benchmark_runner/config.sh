@@ -7,7 +7,7 @@ IFS=',' read -ra CUDA_DEVICES_ARRAY <<< "$CUDA_DEVICES_LIST"
 
 # API Endpoints for evaluation
 export CUSTOMIZED_REMOTE_OPENAI_API_ENDPOINT="https://aigc.x-see.cn/v1"
-export CUSTOMIZED_REMOTE_OPENAI_API_KEY="sk-xxxxxxxxxxx"
+export CUSTOMIZED_REMOTE_OPENAI_API_KEY="sk-xxxxxxx"
 
 # VLLM Configuration
 export VLLM_WORKER_MULTIPROC_METHOD="spawn"
