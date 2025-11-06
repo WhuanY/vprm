@@ -14,8 +14,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/../config.sh" || echo "Warning: config.sh
 # 然后，设置此脚本自身的默认值
 use_cot=1
 gpu_id=0
-# Use IMAGE_BASE_DIR_MME_REALWORLD_LITE from config.sh as default
-image_base_dir="${IMAGE_BASE_DIR_MME_REALWORLD_LITE:-/mnt/minyingqian/MME-RealWorld-Lite-data/data/imgs}"
+bz=50
+# image_base_dir 写死在脚本中
+image_base_dir="/mnt/minyingqian/MME-RealWorld-Lite-data/data/imgs"
 
 # =========================================================================
 # 2. 解析命令行参数 (覆盖默认值)
@@ -32,11 +33,10 @@ usage() {
     echo "  -i, --run-id <id>          Manually specify a run ID. Overrides the auto-generated one."
     echo "  -c, --use-cot <0|1>        Whether to use Chain of Thought. 1 for yes, 0 for no. (Default: $use_cot)"
     echo "  -p, --port <port>          Specify the VLLM inference port. (Default from config.sh: $VLLM_INFERENCE_PORT)"
-    echo "  -b, --image-base-dir <dir> Base directory for MME-RealWorld-Lite images."
-    echo "                             (Default from config.sh: $image_base_dir)"
+    echo "  -b, --bz <size>            Batch size for inference. (Default: $bz)"
     echo "  -h, --help                 Display this help message."
     echo ""
-    echo "Example: $0 --ckpt-path /path/to/new/model --gpu-id 1 --image-base-dir /path/to/images"
+    echo "Example: $0 --ckpt-path /path/to/new/model --gpu-id 1 --bz 50"
 }
 
 # 创建一个临时变量来判断 run-id 是否被手动设置
@@ -67,8 +67,8 @@ while [[ $# -gt 0 ]]; do
         VLLM_INFERENCE_PORT="$2"
         shift 2
         ;;
-        -b|--image-base-dir)
-        image_base_dir="$2"
+        -b|--bz)
+        bz="$2"
         shift 2
         ;;
         -h|--help)
@@ -100,14 +100,17 @@ fi
 # 根据最终的 gpu_id 设置 CUDA_VISIBLE_DEVICES
 export CUDA_VISIBLE_DEVICES=$gpu_id
 
-# 根据最终的 use_cot 值设置 prompt
-if [ "$use_cot" -eq 1 ]; then
-    cot_prompt_settings="Using CoT inference"
+# 根据 use_cot 值设置 prompt
+use_cot=1
+if [ $use_cot -eq 1 ]; then
+    echo "Using CoT inference"
     pre_prompt="You FIRST think about the reasoning process as an internal monologue and then provide the final answer.\n The reasoning process MUST BE enclosed within <think> </think> tags. The final answer MUST BE put within <answer> </answer> tags."
+    after_prompt=""
     cot_suffix="_cot"
 else
-    cot_prompt_settings="Not using CoT inference"
+    echo "Not using CoT inference"
     pre_prompt=""
+    after_prompt="Select the best answer to the above multiple-choice question based on the image. Respond with only the letter (A, B, C, D, or E) of the correct option. \nThe best answer is:,"
     cot_suffix=""
 fi
 
@@ -124,6 +127,7 @@ echo "Inference Run ID: $INFERENCE_RUN_ID"
 echo "Unified Result Base: $UNIFIED_RESULT_BASE"
 echo "VLLM Inference Port: $VLLM_INFERENCE_PORT"
 echo "CoT Setting: $cot_prompt_settings"
+echo "Batch Size (bz): $bz"
 echo "Image Base Directory: $image_base_dir"
 echo "================================================="
 
@@ -159,10 +163,10 @@ run_mme_realworld() {
         --model_name_or_path "$CKPT_PATH" \
         --input_file "data/MME-RealWorld-Lite_unified.json" \
         --save_name "$UNIFIED_RESULT_BASE/mme_realworld_inferenced${cot_suffix}.jsonl" \
-        --tp 1 \
-        --bz 1 \
-        --use_cot $use_cot \
         --pre_prompt "$pre_prompt" \
+        --after_prompt "$after_prompt" \
+        --tp 1 \
+        --bz "$bz" \
         --max_new_tokens 8000 > "$LOG_DIR/mme_inference$cot_suffix.log" 2>&1
     
     echo "Calculating scores for MME-RealWorld-Lite..."
@@ -178,6 +182,5 @@ run_mme_realworld() {
 
 # Run the benchmark if this script is executed directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    # 直接调用函数，不再需要传递任何参数
     run_mme_realworld
 fi

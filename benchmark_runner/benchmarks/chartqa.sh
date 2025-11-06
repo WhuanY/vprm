@@ -14,6 +14,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../config.sh" || echo "Warning: config.sh
 # 然后，设置此脚本自身的默认值
 use_cot=1
 gpu_id=0
+bz=1
 split="test"
 
 # =========================================================================
@@ -32,6 +33,7 @@ usage() {
     echo "  -c, --use-cot <0|1>        Whether to use Chain of Thought. 1 for yes, 0 for no. (Default: $use_cot)"
     echo "  -p, --port <port>          Specify the VLLM inference port. (Default from config.sh: $VLLM_INFERENCE_PORT)"
     echo "  -s, --split <split>         Dataset split to use: 'test' or 'val'. (Default: $split)"
+    echo "  -b, --bz <size>            Batch size for inference. (Default: $bz)"
     echo "  -h, --help                 Display this help message."
     echo ""
     echo "Example: $0 --ckpt-path /path/to/new/model --gpu-id 1 --split val"
@@ -67,6 +69,10 @@ while [[ $# -gt 0 ]]; do
         ;;
         -s|--split)
         split="$2"
+        shift 2
+        ;;
+        -b|--bz)
+        bz="$2"
         shift 2
         ;;
         -h|--help)
@@ -123,6 +129,7 @@ echo "Unified Result Base: $UNIFIED_RESULT_BASE"
 echo "VLLM Inference Port: $VLLM_INFERENCE_PORT"
 echo "CoT Setting: $cot_prompt_settings"
 echo "Dataset Split: $split"
+echo "Batch Size (bz): $bz"
 echo "================================================="
 
 
@@ -157,7 +164,7 @@ run_chartqa() {
     --input_file "data/chartQA_${split}.json" \
     --save_name "$UNIFIED_RESULT_BASE/chartqa_${split}_inferenced${cot_suffix}.jsonl" \
     --tp 1 \
-    --bz 1 \
+    --bz "$bz" \
     --max_new_tokens 8000 > "$LOG_DIR/chartQA_${split}_inferenced${cot_suffix}.log" 2>&1
 
     echo "Calculating scores for ChartQA..."

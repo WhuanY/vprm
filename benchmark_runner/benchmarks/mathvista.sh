@@ -14,7 +14,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../config.sh" || echo "Warning: config.sh
 # 然后，设置此脚本自身的默认值
 use_cot=1
 gpu_id=0
-concurrency=100
+bz=100
 
 # =========================================================================
 # 2. 解析命令行参数 (覆盖默认值)
@@ -31,10 +31,10 @@ usage() {
     echo "  -i, --run-id <id>          Manually specify a run ID. Overrides the auto-generated one."
     echo "  -c, --use-cot <0|1>        Whether to use Chain of Thought. 1 for yes, 0 for no. (Default: $use_cot)"
     echo "  -p, --port <port>          Specify the VLLM inference port. (Default from config.sh: $VLLM_INFERENCE_PORT)"
-    echo "  -n, --num-threads <num>    Number of concurrent threads for requests. (Default: $concurrency)"
+    echo "  -b, --bz <size>            Batch size (number of concurrent threads) for inference. (Default: $bz)"
     echo "  -h, --help                 Display this help message."
     echo ""
-    echo "Example: $0 --ckpt-path /path/to/new/model --gpu-id 1 --use-cot 0 --num-threads 50"
+    echo "Example: $0 --ckpt-path /path/to/new/model --gpu-id 1 --use-cot 0 --bz 50"
 }
 
 # 创建一个临时变量来判断 run-id 是否被手动设置
@@ -65,8 +65,8 @@ while [[ $# -gt 0 ]]; do
         VLLM_INFERENCE_PORT="$2"
         shift 2
         ;;
-        -n|--num-threads)
-        concurrency="$2"
+        -b|--bz)
+        bz="$2"
         shift 2
         ;;
         -h|--help)
@@ -123,7 +123,7 @@ echo "Inference Run ID: $INFERENCE_RUN_ID"
 echo "Unified Result Base: $UNIFIED_RESULT_BASE"
 echo "VLLM Inference Port: $VLLM_INFERENCE_PORT"
 echo "CoT Setting: $cot_prompt_settings"
-echo "Concurrency (num_threads): $concurrency"
+echo "Batch Size (bz): $bz"
 echo "================================================="
 
 
@@ -224,13 +224,13 @@ run_mathvista() {
         --pre_prompt "$pre_prompt" \
         --model_path "$CKPT_PATH" \
         --output_dir "$UNIFIED_RESULT_BASE/mathvista${cot_suffix}" \
-        --num_threads $concurrency \
+        --num_threads $bz \
         --output_file "mathvista_output${cot_suffix}.json" > "$LOG_DIR/mathvista_inference$cot_suffix.log" 2>&1
     
     echo "Extracting answers for MathVista..."
     python extract_answer_w_gpt4o.py \
         --rerun \
-        --num_threads $concurrency \
+        --num_threads $bz \
         --results_file_path "$UNIFIED_RESULT_BASE/mathvista$cot_suffix/mathvista_output$cot_suffix.json" > "$LOG_DIR/mathvista_extract$cot_suffix.log" 2>&1
     
     echo "Calculating scores for MathVista..."

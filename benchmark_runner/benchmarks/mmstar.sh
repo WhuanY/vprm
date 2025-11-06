@@ -14,6 +14,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../config.sh" || echo "Warning: config.sh
 # 然后，设置此脚本自身的默认值
 use_cot=1
 gpu_id=0
+bz=100
 
 # =========================================================================
 # 2. 解析命令行参数 (覆盖默认值)
@@ -30,6 +31,7 @@ usage() {
     echo "  -i, --run-id <id>          Manually specify a run ID. Overrides the auto-generated one."
     echo "  -c, --use-cot <0|1>        Whether to use Chain of Thought. 1 for yes, 0 for no. (Default: $use_cot)"
     echo "  -p, --port <port>          Specify the VLLM inference port. (Default from config.sh: $VLLM_INFERENCE_PORT)"
+    echo "  -b, --bz <size>            Batch size for inference. (Default: $bz)"
     echo "  -h, --help                 Display this help message."
     echo ""
     echo "Example: $0 --ckpt-path /path/to/new/model --gpu-id 1 --use-cot 0"
@@ -61,6 +63,10 @@ while [[ $# -gt 0 ]]; do
         ;;
         -p|--port)
         VLLM_INFERENCE_PORT="$2"
+        shift 2
+        ;;
+        -b|--bz)
+        bz="$2"
         shift 2
         ;;
         -h|--help)
@@ -116,6 +122,7 @@ echo "Inference Run ID: $INFERENCE_RUN_ID"
 echo "Unified Result Base: $UNIFIED_RESULT_BASE"
 echo "VLLM Inference Port: $VLLM_INFERENCE_PORT"
 echo "CoT Setting: $cot_prompt_settings"
+echo "Batch Size (bz): $bz"
 echo "================================================="
 
 
@@ -151,7 +158,7 @@ mmstar() {
         --save_name "$UNIFIED_RESULT_BASE/mmstar_inferenced${cot_suffix}.jsonl" \
         --pre_prompt "$pre_prompt" \
         --tp 1 \
-        --bz 100 \
+        --bz "$bz" \
         --max_new_tokens 8000 > "$LOG_DIR/mmstar_inference.log" 2>&1
     
     echo "Evaluating MMStar responses..."

@@ -14,13 +14,6 @@ from utils import (
     LocalLLMClient
 )
 
-final_prompt_nocot = "Select the best answer to the above multiple-choice question based on the image. \
-Respond with only the letter (A, B, C, D, or E) of the correct option. \nThe best answer is:,"
-final_prompt_cot = "Select the best answer to the above multiple-choice question based on the image. \
-Respond with only the letter (A, B, C, D, or E) of the correct option in the <answer> </answer> tags. \n"
-
-
-
 def _process_single_item_helper(data_with_args):
     """处理单个数据项的辅助函数"""
     data_with_idx, processor, modality, system_prompt, pre_prompt, args = data_with_args
@@ -34,14 +27,6 @@ def _process_single_item_helper(data_with_args):
     is_multiple_choice = "problem_w_choices" in data and data["problem_w_choices"] != ""
     problem = data["problem_w_choices"] if is_multiple_choice else data["problem"]
 
-
-    # 构建问题
-    if args.use_cot == "1":
-        problem = pre_prompt + "\n" + problem + "\n" + final_prompt_cot # First ... <think></think>.....<answer></answer> + problem + select ... in the <answer> </answer> tags
-    elif args.use_cot == "0":
-        problem = problem + "\n" + final_prompt_nocot
-    else:
-        raise ValueError("Invalid use_cot value. use_cot should be 0 or 1.")
 
     if not args.inference_api and args.model_name_or_path:
         if '<image>' not in problem and has_images:
@@ -275,7 +260,6 @@ if __name__ == "__main__":
     parser.add_argument("--bz", type=int, default=20)
     parser.add_argument("--has_images", type=int, default=1)
     parser.add_argument("--primary_key", type=str, default="id")
-    parser.add_argument("--use_cot", type=str, default="1")
 
     args = parser.parse_args()
     

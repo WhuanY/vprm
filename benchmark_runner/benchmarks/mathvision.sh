@@ -14,6 +14,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../config.sh" || echo "Warning: config.sh
 # 然后，设置此脚本自身的默认值
 use_cot=1
 gpu_id=0
+bz=100
 # Use MATHVISION_SUBSET from config.sh as default, or "testmini" if not set
 mathvision_subset="${MATHVISION_SUBSET:-testmini}"
 
@@ -33,6 +34,7 @@ usage() {
     echo "  -c, --use-cot <0|1>        Whether to use Chain of Thought. 1 for yes, 0 for no. (Default: $use_cot)"
     echo "  -p, --port <port>          Specify the VLLM inference port. (Default from config.sh: $VLLM_INFERENCE_PORT)"
     echo "  -s, --subset <subset>      Dataset subset: 'testmini' or 'test'. (Default: $mathvision_subset)"
+    echo "  -b, --bz <size>            Batch size for inference. (Default: $bz)"
     echo "  -h, --help                 Display this help message."
     echo ""
     echo "Example: $0 --ckpt-path /path/to/new/model --gpu-id 1 --subset test"
@@ -68,6 +70,10 @@ while [[ $# -gt 0 ]]; do
         ;;
         -s|--subset)
         mathvision_subset="$2"
+        shift 2
+        ;;
+        -b|--bz)
+        bz="$2"
         shift 2
         ;;
         -h|--help)
@@ -130,6 +136,7 @@ echo "Unified Result Base: $UNIFIED_RESULT_BASE"
 echo "VLLM Inference Port: $VLLM_INFERENCE_PORT"
 echo "CoT Setting: $cot_prompt_settings"
 echo "Dataset Subset: $mathvision_subset"
+echo "Batch Size (bz): $bz"
 echo "================================================="
 
 
@@ -170,7 +177,7 @@ run_mathvision() {
         --save_name "$UNIFIED_RESULT_BASE/mathvision_${mathvision_subset}_inferenced${cot_suffix}.jsonl" \
         --pre_prompt "$pre_prompt" \
         --tp 1 \
-        --bz 100 \
+        --bz "$bz" \
         --max_new_tokens 8000 > "$LOG_DIR/mathvision_inference$cot_suffix.log" 2>&1 
     
     echo "Evaluating MathVision responses..."
