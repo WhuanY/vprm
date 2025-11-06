@@ -166,9 +166,13 @@ def check_generated(args, raw_dataset):
 
 def main(args):
     if args.input_file.endswith('.jsonl'):
-        raw_dataset = load_jsonl(args.input_file)[args.start : args.end]
+        raw_dataset = load_jsonl(args.input_file)
     else:
-        raw_dataset = load_json(args.input_file)[args.start : args.end]
+        raw_dataset = load_json(args.input_file)
+    
+    if args.end == -1:
+        args.end = len(raw_dataset)
+    raw_dataset = raw_dataset[args.start : args.end]
     
     if os.path.exists(args.save_name):
         raw_dataset = check_generated(args, raw_dataset)

@@ -12,7 +12,7 @@ set -e
 source "$(dirname "${BASH_SOURCE[0]}")/../config.sh" || echo "Warning: config.sh not found or has errors, proceeding with script defaults."
 
 # 然后，设置此脚本自身的默认值
-use_cot=1
+use_cot=0
 gpu_id=0
 
 # =========================================================================

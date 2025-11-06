@@ -170,7 +170,7 @@ run_mathvision() {
         --save_name "$UNIFIED_RESULT_BASE/mathvision_${mathvision_subset}_inferenced${cot_suffix}.jsonl" \
         --pre_prompt "$pre_prompt" \
         --tp 1 \
-        --bz 1 \
+        --bz 100 \
         --max_new_tokens 8000 > "$LOG_DIR/mathvision_inference$cot_suffix.log" 2>&1 
     
     echo "Evaluating MathVision responses..."

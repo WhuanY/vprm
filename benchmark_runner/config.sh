@@ -2,7 +2,7 @@
 # config.sh - Common configuration variables for all benchmark scripts
 
 # GPU Configuration
-export CUDA_DEVICES_LIST="5,6,7,8,9"
+export CUDA_DEVICES_LIST="7,8,9"
 IFS=',' read -ra CUDA_DEVICES_ARRAY <<< "$CUDA_DEVICES_LIST"
 
 # API Endpoints for evaluation
@@ -16,14 +16,14 @@ export VLLM_TENSOR_PARALLEL_SIZE=1
 export VLLM_INFERENCE_PORT=9753  # Default port, can be overridden
 
 # Benchmark Configuration
-export MATHVISION_SUBSET="testmini"  # "testmini" or "test"
+export MATHVISION_SUBSET="test"  # "testmini" or "test"
 export IMAGE_BASE_DIR_MME_REALWORLD_LITE="/mnt/minyingqian/MME-RealWorld-Lite-data/data/imgs"
 
 # Model Checkpoint Path (modify this to your checkpoint path)
 # Only set default if not already set as environment variable
 if [ -z "$CKPT_PATH" ]; then
-    # export CKPT_PATH="/mnt/minyingqian/models/Qwen2.5-VL-3B-Instruct"
-    export CKPT_PATH="/mnt/minyingqian/data/results/trm_140_base-rm_conflict-it1-trm/global_step_80/actor/huggingface"
+    export CKPT_PATH="/mnt/minyingqian/models/Qwen2.5-VL-3B-Instruct"
+    # export CKPT_PATH="/mnt/minyingqian/data/results/trm_140_base-rm_conflict-it1-trm/global_step_80/actor/huggingface"
 fi
 
 # Base directory (script location)
