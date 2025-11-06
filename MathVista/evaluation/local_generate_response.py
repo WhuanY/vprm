@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import base64
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
@@ -343,24 +344,48 @@ def main():
         logging.debug(f"Generating response for problem: {problem_id}...")
         
         problem_result = None
-        try:
-            response = model.get_response(user_prompt=query, decoded_image=problem_decoded_image)
-            problem_result = problem.copy()
-            problem_result['query'] = query
-            if args.shot_type == 'solution':
-                problem_result['response'] = response
-            else:
-                output, error = evaluate_code(response)
-                problem_result['response'] = response
-                problem_result['execution'] = output
-                problem_result['error'] = str(error)
-            logging.debug(f"Query: \n{query}")
-            logging.debug(f"Response: \n{response}")
-        except Exception as e:
-            logging.error(f"Error in extracting answer for {problem_id}")
-            logging.error(e)
-            problem_result = problem.copy()
-            problem_result['error'] = str(e)
+        max_retries = 3
+        retry_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                response = model.get_response(user_prompt=query, decoded_image=problem_decoded_image)
+                problem_result = problem.copy()
+                problem_result['query'] = query
+                if args.shot_type == 'solution':
+                    problem_result['response'] = response
+                else:
+                    output, error = evaluate_code(response)
+                    problem_result['response'] = response
+                    problem_result['execution'] = output
+                    problem_result['error'] = str(error)
+                logging.debug(f"Query: \n{query}")
+                logging.debug(f"Response: \n{response}")
+                break  # Success, exit retry loop
+            except Exception as e:
+                error_str = str(e)
+                is_internal_error = (
+                    "500" in error_str or 
+                    "Internal Server Error" in error_str or
+                    "Error code: 500" in error_str
+                )
+                
+                if is_internal_error and attempt < max_retries - 1:
+                    # Retry for internal server errors
+                    wait_time = retry_delay * (attempt + 1)  # Exponential backoff
+                    logging.warning(
+                        f"Internal server error (500) for problem {problem_id}, "
+                        f"attempt {attempt + 1}/{max_retries}. Retrying in {wait_time}s..."
+                    )
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    # Non-retryable error or max retries reached
+                    logging.error(f"Error in extracting answer for {problem_id}")
+                    logging.error(e)
+                    problem_result = problem.copy()
+                    problem_result['error'] = str(e)
+                    break
 
         # Thread-safe update of results
         with results_lock:

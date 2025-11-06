@@ -143,118 +143,23 @@ echo "Base directory: $BASE_DIR"
 echo "================================================="
 
 # =========================================================================
-# 3. VLLM 服务器管理函数
+# 3. Benchmark 运行函数
 # =========================================================================
-
-start_vllm_server() {
-    local PORT="$1"
-    local GPU_ID="$2"
-    echo "[Port $PORT] Starting VLLM server on port $PORT using GPU $GPU_ID..."
-    
-    # 设置 CUDA_VISIBLE_DEVICES 环境变量
-    CUDA_VISIBLE_DEVICES="$GPU_ID" nohup vllm serve "$CKPT_PATH" \
-        --port "$PORT" \
-        --host "0.0.0.0" \
-        --tensor-parallel-size "$VLLM_TENSOR_PARALLEL_SIZE" \
-        --gpu_memory_utilization 0.7 > "$BASE_DIR/logs/$INFERENCE_RUN_ID/vllm_server_$PORT.log" 2>&1 &
-    
-    local SERVER_PID=$!
-    echo "[Port $PORT] VLLM server started with PID: $SERVER_PID on GPU $GPU_ID"
-    
-    # Wait for server to start
-    echo "[Port $PORT] Waiting for VLLM server to initialize..."
-    local max_wait=300  # 5 minutes
-    local wait_interval=5
-    local elapsed=0
-    
-    while [ $elapsed -lt $max_wait ]; do
-        if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PORT/health" 2>/dev/null | grep -q "200"; then
-            echo "[Port $PORT] ✓ VLLM server is ready"
-            return 0
-        fi
-        sleep $wait_interval
-        elapsed=$((elapsed + wait_interval))
-        if [ $((elapsed % 30)) -eq 0 ]; then
-            echo "[Port $PORT] Still waiting... (${elapsed}s/${max_wait}s)"
-        fi
-    done
-    
-    # Check if server process is still running
-    if ! ps -p $SERVER_PID > /dev/null 2>&1; then
-        echo "[Port $PORT] ✗ Error: VLLM server failed to start"
-        cat "$BASE_DIR/logs/$INFERENCE_RUN_ID/vllm_server_$PORT.log"
-        return 1
-    fi
-    
-    echo "[Port $PORT] ✗ Error: VLLM server did not become healthy within ${max_wait}s"
-    return 1
-}
-
-# Function to stop VLLM server
-stop_vllm_server() {
-    local PORT="$1"
-    if [ "$PORT" == "0000" ]; then
-        return 0
-    fi
-    echo "[Port $PORT] Stopping VLLM server..."
-    pkill -f "vllm serve.*--port $PORT" || true
-    sleep 2
-}
-
-# =========================================================================
-# 4. Benchmark 配置和运行函数
-# =========================================================================
-
-# 定义每个benchmark是否依赖VLLM serve
-# true = 需要VLLM serve, false = 不需要
-declare -A BENCHMARK_NEEDS_SERVE=(
-    ["mathvista"]="true"
-    ["mathvision"]="false"
-    ["mme_realworld"]="false"
-    ["realworldqa"]="false"
-    ["blink"]="true"
-    ["chartqa"]="false"
-    ["mmstar"]="false"
-)
-
-# 定义每个benchmark使用的端口（如果需要serve）
-declare -A BENCHMARK_PORTS=(
-    ["mathvista"]="9753"
-    ["mathvision"]="0000"
-    ["mme_realworld"]="0000"
-    ["realworldqa"]="0000"
-    ["blink"]="9751"
-    ["chartqa"]="0000"
-    ["mmstar"]="0000"
-)
 
 run_benchmark_parallel() {
     local BENCHMARK="$1"
-    local PORT="$2"
-    local GPU_ID="$3"
+    local GPU_ID="$2"
     
     local LOG_DIR="$BASE_DIR/logs/$INFERENCE_RUN_ID"
     local BENCHMARK_LOG="$LOG_DIR/${BENCHMARK}_run.log"
     
-    echo "[$BENCHMARK] Starting benchmark on port $PORT (GPU $GPU_ID)..." | tee -a "$BENCHMARK_LOG"
+    echo "[$BENCHMARK] Starting benchmark on GPU $GPU_ID..." | tee -a "$BENCHMARK_LOG"
     
     # 构建基准测试脚本的命令行参数
     local BENCHMARK_ARGS=()
     BENCHMARK_ARGS+=("--ckpt-path" "$CKPT_PATH")
     BENCHMARK_ARGS+=("--gpu-id" "$GPU_ID")
     BENCHMARK_ARGS+=("--run-id" "$INFERENCE_RUN_ID")
-    
-    if [ "$PORT" != "0000" ]; then
-        BENCHMARK_ARGS+=("--port" "$PORT")
-        
-        # 启动 VLLM 服务器
-        start_vllm_server "$PORT" "$GPU_ID" || {
-            echo "[$BENCHMARK] ✗ Failed to start VLLM server" | tee -a "$BENCHMARK_LOG"
-            return 1
-        }
-    else
-        echo "[$BENCHMARK] Does not require VLLM server (using direct inference)" | tee -a "$BENCHMARK_LOG"
-    fi
     
     # 运行 benchmark 脚本
     echo "[$BENCHMARK] Running benchmark evaluation..." | tee -a "$BENCHMARK_LOG"
@@ -266,26 +171,17 @@ run_benchmark_parallel() {
         BENCHMARK_RESULT=1
     fi
     
-    # 停止 VLLM 服务器（如果需要）
-    if [ "$PORT" != "0000" ]; then
-        stop_vllm_server "$PORT"
-    fi
-    
     return $BENCHMARK_RESULT
 }
 
 # =========================================================================
-# 5. 自动分配GPU和端口
+# 4. 自动分配GPU
 # =========================================================================
 
-# 动态分配GPU和端口
+# 动态分配GPU
 # 为每个benchmark分配一个独立的GPU
-# 为需要serve的benchmark分配不同的端口
 declare -A ASSIGNED_GPUS
-declare -A ASSIGNED_PORTS
 
-PORT_BASE=9750
-port_counter=1
 gpu_counter=0
 
 for BENCHMARK in "${BENCHMARKS[@]}"; do
@@ -293,19 +189,11 @@ for BENCHMARK in "${BENCHMARKS[@]}"; do
     ASSIGNED_GPUS["$BENCHMARK"]="${CUDA_DEVICES_ARRAY[$gpu_counter]}"
     gpu_counter=$((gpu_counter + 1))
     
-    # 分配端口（仅对需要serve的benchmark）
-    if [ "${BENCHMARK_NEEDS_SERVE[$BENCHMARK]}" == "true" ]; then
-        ASSIGNED_PORTS["$BENCHMARK"]="$((PORT_BASE + port_counter))"
-        port_counter=$((port_counter + 1))
-    else
-        ASSIGNED_PORTS["$BENCHMARK"]="0000"
-    fi
-    
-    echo "[$BENCHMARK] Assigned GPU: ${ASSIGNED_GPUS[$BENCHMARK]}, Port: ${ASSIGNED_PORTS[$BENCHMARK]}"
+    echo "[$BENCHMARK] Assigned GPU: ${ASSIGNED_GPUS[$BENCHMARK]}"
 done
 
 # =========================================================================
-# 6. 主执行逻辑 - 并行运行所有基准测试
+# 5. 主执行逻辑 - 并行运行所有基准测试
 # =========================================================================
 
 echo ""
@@ -315,12 +203,11 @@ echo ""
 # 启动所有基准测试作为后台进程
 declare -A PIDS
 for BENCHMARK in "${BENCHMARKS[@]}"; do
-    PORT="${ASSIGNED_PORTS[$BENCHMARK]}"
     GPU_ID="${ASSIGNED_GPUS[$BENCHMARK]}"
     
-    run_benchmark_parallel "$BENCHMARK" "$PORT" "$GPU_ID" &
+    run_benchmark_parallel "$BENCHMARK" "$GPU_ID" &
     PIDS["$BENCHMARK"]=$!
-    echo "[$BENCHMARK] Started with PID: ${PIDS[$BENCHMARK]} (GPU: $GPU_ID, Port: $PORT)"
+    echo "[$BENCHMARK] Started with PID: ${PIDS[$BENCHMARK]} (GPU: $GPU_ID)"
 done
 
 echo ""
@@ -340,18 +227,8 @@ for BENCHMARK in "${BENCHMARKS[@]}"; do
 done
 
 # =========================================================================
-# 7. 清理和总结
+# 6. 清理和总结
 # =========================================================================
-
-# 确保所有 VLLM 服务器都已停止
-echo ""
-echo "Stopping all VLLM servers..."
-for BENCHMARK in "${BENCHMARKS[@]}"; do
-    PORT="${ASSIGNED_PORTS[$BENCHMARK]}"
-    if [ "$PORT" != "0000" ]; then
-        stop_vllm_server "$PORT"
-    fi
-done
 
 echo ""
 echo "================================================="
@@ -366,13 +243,13 @@ fi
 echo "================================================="
 echo ""
 echo "Results are available in the following locations:"
-echo "- MathVista: $BASE_DIR/MathVista/results/$INFERENCE_RUN_ID/"
-echo "- MathVision: $BASE_DIR/MathVision/data/"
-echo "- MME-RealWorld-Lite: $BASE_DIR/MME-RealWorld-Lite/data/"
-echo "- RealWorldQA: $BASE_DIR/realworldqa/data/"
-echo "- BLINK: $BASE_DIR/BLINK_Benchmark/eval/results/"
-echo "- ChartQA: $BASE_DIR/ChartQA/data/"
-echo "- MMStar: $BASE_DIR/MMStar/data/"
+echo "- MathVista: $UNIFIED_RESULT_BASE/mathvista*/$SHARED_TIMESTAMP/"
+echo "- MathVision: $UNIFIED_RESULT_BASE/mathvision*/$SHARED_TIMESTAMP/"
+echo "- MME-RealWorld-Lite: $UNIFIED_RESULT_BASE/mme_realworld*/$SHARED_TIMESTAMP/"
+echo "- RealWorldQA: $UNIFIED_RESULT_BASE/realworldqa*/$SHARED_TIMESTAMP/"
+echo "- BLINK: $UNIFIED_RESULT_BASE/blink*/$SHARED_TIMESTAMP/"
+echo "- ChartQA: $UNIFIED_RESULT_BASE/chartqa*/$SHARED_TIMESTAMP/"
+echo "- MMStar: $UNIFIED_RESULT_BASE/mmstar*/$SHARED_TIMESTAMP/"
 echo ""
 echo "Logs are available in: $BASE_DIR/logs/$INFERENCE_RUN_ID/"
 echo ""

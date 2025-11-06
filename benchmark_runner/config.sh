@@ -2,21 +2,20 @@
 # config.sh - Common configuration variables for all benchmark scripts
 
 # GPU Configuration
-export CUDA_DEVICES_LIST="7,8,9"
+export CUDA_DEVICES_LIST="5,6,7,8,9"
 IFS=',' read -ra CUDA_DEVICES_ARRAY <<< "$CUDA_DEVICES_LIST"
 
 # API Endpoints for evaluation
 export CUSTOMIZED_REMOTE_OPENAI_API_ENDPOINT="https://aigc.x-see.cn/v1"
-export CUSTOMIZED_REMOTE_OPENAI_API_KEY="sk-xxxxxxx"
+export CUSTOMIZED_REMOTE_OPENAI_API_KEY="sk-xxxxxxxxxxxxxx"
 
 # VLLM Configuration
 export VLLM_WORKER_MULTIPROC_METHOD="spawn"
 export VLLM_USE_TRITON_FLASH_ATTN=True
 export VLLM_TENSOR_PARALLEL_SIZE=1
-export VLLM_INFERENCE_PORT=9753  # Default port, can be overridden
 
 # Benchmark Configuration
-export MATHVISION_SUBSET="test"  # "testmini" or "test"
+export MATHVISION_SUBSET="testmini"  # "testmini" or "test"
 export IMAGE_BASE_DIR_MME_REALWORLD_LITE="/mnt/minyingqian/MME-RealWorld-Lite-data/data/imgs"
 
 # Model Checkpoint Path (modify this to your checkpoint path)
@@ -81,12 +80,13 @@ parse_ckpt_path() {
 # Generate unified result directory and paths
 # =========================================================================
 # Parse checkpoint path to get unified directory name
+# New structure: results/$UNIFIED_RESULT_DIR/benchmark_name/$SHARED_TIMESTAMP/
 if [ -n "$CKPT_PATH" ]; then
     UNIFIED_RESULT_DIR=$(parse_ckpt_path "$CKPT_PATH")
     export UNIFIED_RESULT_DIR
     
-    # Generate unified result base path
-    export UNIFIED_RESULT_BASE="$BASE_DIR/results/$UNIFIED_RESULT_DIR/$SHARED_TIMESTAMP"
+    # Generate unified result base path (without timestamp, timestamp will be added per benchmark)
+    export UNIFIED_RESULT_BASE="$BASE_DIR/results/$UNIFIED_RESULT_DIR"
     
     # Generate CKPT_NAME and INFERENCE_RUN_ID (for backward compatibility)
     export CKPT_NAME=$(basename "$CKPT_PATH")
@@ -96,7 +96,7 @@ else
     export CKPT_NAME="unknown"
     export INFERENCE_RUN_ID="unknown_${SHARED_TIMESTAMP}"
     export UNIFIED_RESULT_DIR="unknown"
-    export UNIFIED_RESULT_BASE="$BASE_DIR/results/unknown/$SHARED_TIMESTAMP"
+    export UNIFIED_RESULT_BASE="$BASE_DIR/results/unknown"
 fi
 
 # Validate configuration

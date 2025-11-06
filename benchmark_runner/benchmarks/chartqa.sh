@@ -115,9 +115,6 @@ else
     cot_suffix=""
 fi
 
-# 确保统一输出目录存在
-mkdir -p "$UNIFIED_RESULT_BASE"
-
 # 打印最终生效的配置
 echo "================================================="
 echo "Final Configuration for ChartQA Run:"
@@ -126,7 +123,6 @@ echo "GPU ID in use (CUDA_VISIBLE_DEVICES): $CUDA_VISIBLE_DEVICES"
 echo "Model Checkpoint Path: $CKPT_PATH"
 echo "Inference Run ID: $INFERENCE_RUN_ID"
 echo "Unified Result Base: $UNIFIED_RESULT_BASE"
-echo "VLLM Inference Port: $VLLM_INFERENCE_PORT"
 echo "CoT Setting: $cot_prompt_settings"
 echo "Dataset Split: $split"
 echo "Batch Size (bz): $bz"
@@ -138,8 +134,10 @@ echo "================================================="
 # =========================================================================
 
 run_chartqa() {
-    local PORT="${1:-$VLLM_INFERENCE_PORT}"
-    local LOG_DIR="$UNIFIED_RESULT_BASE"
+    # New structure: results/$UNIFIED_RESULT_DIR/chartqa/$SHARED_TIMESTAMP/
+    local BENCHMARK_NAME="chartqa${cot_suffix}"
+    local BENCHMARK_DIR="$UNIFIED_RESULT_BASE/$BENCHMARK_NAME"
+    local LOG_DIR="$BENCHMARK_DIR/$SHARED_TIMESTAMP"
     mkdir -p "$LOG_DIR"
 
     echo "=============================="
@@ -162,18 +160,18 @@ run_chartqa() {
     --pre_prompt "$pre_prompt" \
     --use_cot $use_cot \
     --input_file "data/chartQA_${split}.json" \
-    --save_name "$UNIFIED_RESULT_BASE/chartqa_${split}_inferenced${cot_suffix}.jsonl" \
+    --save_name "$BENCHMARK_DIR/$SHARED_TIMESTAMP/chartqa_${split}_inferenced${cot_suffix}.jsonl" \
     --tp 1 \
     --bz "$bz" \
     --max_new_tokens 8000 > "$LOG_DIR/chartQA_${split}_inferenced${cot_suffix}.log" 2>&1
 
     echo "Calculating scores for ChartQA..."
     python judge.py \
-        --input_file "$UNIFIED_RESULT_BASE/chartqa_${split}_inferenced${cot_suffix}.jsonl" \
+        --input_file "$BENCHMARK_DIR/$SHARED_TIMESTAMP/chartqa_${split}_inferenced${cot_suffix}.jsonl" \
         --judge_api "$CUSTOMIZED_REMOTE_OPENAI_API_ENDPOINT" \
         --api_key "$CUSTOMIZED_REMOTE_OPENAI_API_KEY" \
         --use_relax_accuracy \
-        --output_file "$UNIFIED_RESULT_BASE/chartqa_${split}_judged${cot_suffix}.jsonl" > "$LOG_DIR/chartqa_judge${cot_suffix}.log" 2>&1
+        --output_file "$BENCHMARK_DIR/$SHARED_TIMESTAMP/chartqa_${split}_judged${cot_suffix}.jsonl" > "$LOG_DIR/chartqa_judge${cot_suffix}.log" 2>&1
     
     echo "ChartQA evaluation completed."
     echo "Logs are in: $LOG_DIR"

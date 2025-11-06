@@ -31,9 +31,8 @@ usage() {
     echo "  -g, --gpu-id <id>          Specify the GPU ID to use. (Default: $gpu_id)"
     echo "  -i, --run-id <id>          Manually specify a run ID. Overrides the auto-generated one."
     echo "  -c, --use-cot <0|1>        Whether to use Chain of Thought. 1 for yes, 0 for no. (Default: $use_cot)"
-    echo "  -p, --port <port>          Specify the VLLM inference port. (Default from config.sh: $VLLM_INFERENCE_PORT)"
     echo "  -t, --task-name <name>     Task name for BLINK. (Default: $task_name)"
-    echo "  -b, --bz <size>            Batch size (number of concurrent threads) for inference. (Default: $bz)"
+    echo "  -b, --bz <size>            Batch size for inference. (Default: $bz)"
     echo "  -h, --help                 Display this help message."
     echo ""
     echo "Example: $0 --ckpt-path /path/to/new/model --gpu-id 1 --use-cot 0"
@@ -61,10 +60,6 @@ while [[ $# -gt 0 ]]; do
         ;;
         -c|--use-cot)
         use_cot="$2"
-        shift 2
-        ;;
-        -p|--port)
-        VLLM_INFERENCE_PORT="$2"
         shift 2
         ;;
         -t|--task-name)
@@ -115,9 +110,6 @@ else
     cot_suffix=""
 fi
 
-# 确保统一输出目录存在
-mkdir -p "$UNIFIED_RESULT_BASE/blink${cot_suffix}"
-
 # 打印最终生效的配置
 echo "================================================="
 echo "Final Configuration for BLINK Run:"
@@ -126,7 +118,6 @@ echo "GPU ID in use (CUDA_VISIBLE_DEVICES): $CUDA_VISIBLE_DEVICES"
 echo "Model Checkpoint Path: $CKPT_PATH"
 echo "Inference Run ID: $INFERENCE_RUN_ID"
 echo "Unified Result Base: $UNIFIED_RESULT_BASE"
-echo "VLLM Inference Port: $VLLM_INFERENCE_PORT"
 echo "CoT Setting: $cot_prompt_settings"
 echo "Task Name: $task_name"
 echo "Batch Size (bz): $bz"
@@ -134,73 +125,14 @@ echo "================================================="
 
 
 # =========================================================================
-# 4. VLLM Server Management Functions
-# =========================================================================
-
-# Function to start VLLM server
-start_vllm_server() {
-    local PORT="$1"
-    local GPU_ID="$2"
-    local LOG_DIR="$3"
-    echo "[Port $PORT] Starting VLLM server on port $PORT using GPU $GPU_ID..."
-    
-    # 设置 CUDA_VISIBLE_DEVICES 环境变量
-    CUDA_VISIBLE_DEVICES="$GPU_ID" nohup vllm serve "$CKPT_PATH" \
-        --port "$PORT" \
-        --host "0.0.0.0" \
-        --tensor-parallel-size "$VLLM_TENSOR_PARALLEL_SIZE" \
-        --gpu_memory_utilization 0.7 > "$LOG_DIR/vllm_server_$PORT.log" 2>&1 &
-    
-    local SERVER_PID=$!
-    echo "[Port $PORT] VLLM server started with PID: $SERVER_PID on GPU $GPU_ID"
-    
-    # Wait for server to start
-    echo "[Port $PORT] Waiting for VLLM server to initialize..."
-    local max_wait=300  # 5 minutes
-    local wait_interval=5
-    local elapsed=0
-    
-    while [ $elapsed -lt $max_wait ]; do
-        if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PORT/health" 2>/dev/null | grep -q "200"; then
-            echo "[Port $PORT] ✓ VLLM server is ready"
-            return 0
-        fi
-        sleep $wait_interval
-        elapsed=$((elapsed + wait_interval))
-        if [ $((elapsed % 30)) -eq 0 ]; then
-            echo "[Port $PORT] Still waiting... (${elapsed}s/${max_wait}s)"
-        fi
-    done
-    
-    # Check if server process is still running
-    if ! ps -p $SERVER_PID > /dev/null 2>&1; then
-        echo "[Port $PORT] ✗ Error: VLLM server failed to start"
-        cat "$LOG_DIR/vllm_server_$PORT.log"
-        return 1
-    fi
-    
-    echo "[Port $PORT] ✗ Error: VLLM server did not become healthy within ${max_wait}s"
-    return 1
-}
-
-# Function to stop VLLM server
-stop_vllm_server() {
-    local PORT="$1"
-    if [ "$PORT" == "0000" ]; then
-        return 0
-    fi
-    echo "[Port $PORT] Stopping VLLM server..."
-    pkill -f "vllm serve.*--port $PORT" || true
-    sleep 2
-}
-
-# =========================================================================
-# 5. 主逻辑 (使用最终确定的变量值)
+# 4. 主逻辑 (使用最终确定的变量值)
 # =========================================================================
 
 run_blink() {
-    local PORT="${1:-$VLLM_INFERENCE_PORT}"
-    local LOG_DIR="$UNIFIED_RESULT_BASE"
+    # New structure: results/$UNIFIED_RESULT_DIR/blink/$SHARED_TIMESTAMP/
+    local BENCHMARK_NAME="blink${cot_suffix}"
+    local BENCHMARK_DIR="$UNIFIED_RESULT_BASE/$BENCHMARK_NAME"
+    local LOG_DIR="$BENCHMARK_DIR/$SHARED_TIMESTAMP"
     mkdir -p "$LOG_DIR"
     
     echo "================================"
@@ -213,19 +145,12 @@ run_blink() {
         return 1; 
     }
 
-    # Start VLLM server
-    echo "Starting VLLM server for BLINK..."
-    if ! start_vllm_server "$PORT" "$gpu_id" "$LOG_DIR"; then
-        echo "ERROR: Failed to start VLLM server"
-        return 1
-    fi
-
     cd $BASE_DIR/BLINK_Benchmark/eval
-    export INFERENCE_ENDPOINT="http://localhost:$PORT/v1" # Make sure this var is set before running inference
     
     # Set unified output directories
-    BLINK_OUTPUT_DIR="$UNIFIED_RESULT_BASE/blink${cot_suffix}"
-    BLINK_IMAGE_DIR="$BLINK_OUTPUT_DIR/images"
+    BLINK_OUTPUT_DIR="$BENCHMARK_DIR/$SHARED_TIMESTAMP"
+    # Fixed image directory under BLINK_Benchmark to avoid space waste
+    BLINK_IMAGE_DIR="$BASE_DIR/BLINK_Benchmark/images"
     
     # Ensure directories exist
     mkdir -p "$BLINK_OUTPUT_DIR"
@@ -235,13 +160,13 @@ run_blink() {
     echo "Output directory: $BLINK_OUTPUT_DIR"
     python test_benchmark.py \
         --model_name_or_path "$CKPT_PATH" \
-        --inference_api "$INFERENCE_ENDPOINT" \
         --dataset_local_path ../data \
         --task_name "$task_name" \
         --pre_prompt "$pre_prompt" \
         --output_save_folder "$BLINK_OUTPUT_DIR" \
         --image_save_folder "$BLINK_IMAGE_DIR" \
-        --num_threads $bz \
+        --batch_size $bz \
+        --tp "$VLLM_TENSOR_PARALLEL_SIZE" \
         --regen \
         > "$LOG_DIR/blink_inference$cot_suffix.log" 2>&1
 
@@ -259,10 +184,6 @@ run_blink() {
     echo "  - Predictions: $BLINK_OUTPUT_DIR/val_predictions_*.json"
     echo "  - Results: $BLINK_OUTPUT_DIR/val_results_*.json"
     echo "BLINK DONE" > "$LOG_DIR/blink_done$cot_suffix.flag"
-    
-    # Stop VLLM server
-    echo "Stopping VLLM server..."
-    stop_vllm_server "$PORT"
 }
 
 # Run the benchmark if this script is executed directly

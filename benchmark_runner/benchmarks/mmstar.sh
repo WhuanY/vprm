@@ -109,9 +109,6 @@ else
     cot_suffix=""
 fi
 
-# 确保统一输出目录存在
-mkdir -p "$UNIFIED_RESULT_BASE"
-
 # 打印最终生效的配置
 echo "================================================="
 echo "Final Configuration for MMStar Run:"
@@ -120,7 +117,6 @@ echo "GPU ID in use (CUDA_VISIBLE_DEVICES): $CUDA_VISIBLE_DEVICES"
 echo "Model Checkpoint Path: $CKPT_PATH"
 echo "Inference Run ID: $INFERENCE_RUN_ID"
 echo "Unified Result Base: $UNIFIED_RESULT_BASE"
-echo "VLLM Inference Port: $VLLM_INFERENCE_PORT"
 echo "CoT Setting: $cot_prompt_settings"
 echo "Batch Size (bz): $bz"
 echo "================================================="
@@ -131,8 +127,10 @@ echo "================================================="
 # =========================================================================
 
 mmstar() {
-    local PORT="${1:-$VLLM_INFERENCE_PORT}"
-    local LOG_DIR="$UNIFIED_RESULT_BASE"
+    # New structure: results/$UNIFIED_RESULT_DIR/mmstar/$SHARED_TIMESTAMP/
+    local BENCHMARK_NAME="mmstar${cot_suffix}"
+    local BENCHMARK_DIR="$UNIFIED_RESULT_BASE/$BENCHMARK_NAME"
+    local LOG_DIR="$BENCHMARK_DIR/$SHARED_TIMESTAMP"
     mkdir -p "$LOG_DIR"
     
     echo "=============================="
@@ -155,7 +153,7 @@ mmstar() {
     CUDA_VISIBLE_DEVICES=$gpu_id python inference.py \
         --model_name_or_path "$CKPT_PATH" \
         --input_file "data/mmstar.json" \
-        --save_name "$UNIFIED_RESULT_BASE/mmstar_inferenced${cot_suffix}.jsonl" \
+        --save_name "$BENCHMARK_DIR/$SHARED_TIMESTAMP/mmstar_inferenced${cot_suffix}.jsonl" \
         --pre_prompt "$pre_prompt" \
         --tp 1 \
         --bz "$bz" \
@@ -163,12 +161,12 @@ mmstar() {
     
     echo "Evaluating MMStar responses..."
     python judge.py \
-        --input_file "$UNIFIED_RESULT_BASE/mmstar_inferenced${cot_suffix}.jsonl" \
+        --input_file "$BENCHMARK_DIR/$SHARED_TIMESTAMP/mmstar_inferenced${cot_suffix}.jsonl" \
         --judge_api $CUSTOMIZED_REMOTE_OPENAI_API_ENDPOINT \
         --api_key $CUSTOMIZED_REMOTE_OPENAI_API_KEY \
-        --output_file "$UNIFIED_RESULT_BASE/mmstar_judged${cot_suffix}.jsonl" > "$LOG_DIR/mmstar_judge$cot_suffix.log" 2>&1
+        --output_file "$BENCHMARK_DIR/$SHARED_TIMESTAMP/mmstar_judged${cot_suffix}.jsonl" > "$LOG_DIR/mmstar_judge$cot_suffix.log" 2>&1
     
-    echo "MMStar evaluation completed. Results in: $UNIFIED_RESULT_BASE/mmstar_judged${cot_suffix}.jsonl"
+    echo "MMStar evaluation completed. Results in: $BENCHMARK_DIR/$SHARED_TIMESTAMP/mmstar_judged${cot_suffix}.jsonl"
     echo "MMStar DONE" > "$LOG_DIR/mmstar_done$cot_suffix.flag"
 }
 

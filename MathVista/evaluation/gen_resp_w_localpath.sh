@@ -1,8 +1,11 @@
 export VLLM_WORKER_MULTIPROC_METHOD="spawn"
 export VLLM_USE_TRITON_FLASH_ATTN=True
-export VLLM_TENSOR_PARALLEL_SIZE=2
+export CUDA_VISIBLE_DEVICES="5"
+
+
 use_cot=1
-num_threads=10  # Get num_threads from first argument, default to 1 if not provided
+batch_size=20  # Batch size for inference
+tp=1  # Tensor parallel size
 mkdir -p logs
 
 if [ "$use_cot" = "1" ]; then
@@ -14,14 +17,15 @@ else
     cot_suffix=""
 fi
 
-echo "Using $num_threads thread(s) for concurrent request processing"
+echo "Using batch processing with batch_size=$batch_size, tp=$tp"
 
-python local_generate_response.py \
+python localvllm_generate_response.py \
 --data_file_path /home/minyingqian/vprm/MathVista/data/testmini-00000-of-00001-725687bf7a18d64b.parquet \
---inference_api http://localhost:9751/v1 \
 --model_path /mnt/minyingqian/models/Qwen2.5-VL-3B-Instruct \
 --output_dir ../results/qwen25vl3b$cot_suffix \
 --output_file output_qwen25vl3b$cot_suffix.json \
 --pre_prompt "$pre_prompt" \
+--batch_size $batch_size \
+--tp $tp \
 --rerun \
---num_threads $num_threads 2>&1 | tee logs/gen_resp_qwen25vl3b$cot_suffix.log
+2>&1 | tee logs/gen_resp_qwen25vl3b$cot_suffix.log

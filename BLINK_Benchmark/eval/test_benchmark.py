@@ -6,13 +6,14 @@ import os
 import re
 from multiple_choice import match_multiple_choice
 import argparse
-from query_model import (query_gpt4v, query_local)
+from transformers import AutoProcessor, AutoTokenizer
+from qwen_vl_utils import process_vision_info
+from vllm import LLM, SamplingParams
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
+
 import hashlib
 
 import pandas as pd
-from PIL import Image
 import io
 
 def load_relative_reflectance_data(data_files):
@@ -135,10 +136,81 @@ def analyze_answer(d, gpt_answer, all_choices):
         return None
 
 
+def _process_single_item_helper(data_with_args):
+    """
+    Process a single data item to prepare it for batch inference.
+    
+    Parameters:
+    - data_with_args: tuple of (idx, data, task_name, image_folder, processor, args)
+    
+    Returns:
+    - tuple of (idx, result_dict) where result_dict contains the processed input for VLLM
+    """
+    idx, data, task_name, image_folder, processor, args = data_with_args
+    
+    # Load prompt and images
+    image_paths, prompt = load_prompt(task_name, data, image_folder, args)
+    
+    has_images = image_paths is not None and len(image_paths) > 0
+    
+    # Build messages following MME-RealWorld-Lite pattern
+    if has_images:
+        # Load images as PIL Image objects from paths
+        images = [Image.open(img_path) for img_path in image_paths]
+        
+        # Add <image> markers to prompt (required for process_vision_info)
+        if '<image>' not in prompt:
+            image_markers = '\n'.join(['<image>'] * len(images))
+            prompt_with_markers = image_markers + '\n' + prompt
+        else:
+            prompt_with_markers = prompt
+        
+        # Split by <image> to interleave text and images
+        text_parts = prompt_with_markers.split("<image>")
+        content = []
+        
+        # Build content: images first, then text (aligned with VLMEvalKit)
+        for i in range(len(images)):
+            if i < len(text_parts) and text_parts[i].strip():
+                content.append({"type": "text", "text": text_parts[i].strip()})
+            content.append({"type": "image", "image": images[i]})
+        
+        # Add remaining text after all images
+        if len(text_parts) > len(images) and text_parts[-1].strip():
+            content.append({"type": "text", "text": text_parts[-1].strip()})
+    else:
+        # Pure text case
+        content = [{"type": "text", "text": prompt}]
+
+    messages = [{"role": "user", "content": content}]
+    if hasattr(args, 'system_prompt') and args.system_prompt:
+        messages.insert(0, {"role": "system", "content": args.system_prompt})
+    
+    # Process with processor
+    processed_prompt = processor.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+    
+    # Prepare input for VLLM
+    if has_images:
+        image_data, _ = process_vision_info(messages)
+        result = {"prompt": processed_prompt, "multi_modal_data": {"image": image_data}}
+    else:
+        result = {"prompt": processed_prompt}
+    
+    # Store original data for later use
+    result["_original_data"] = data
+    result["_image_paths"] = image_paths
+    result["_original_prompt"] = prompt
+    
+    return idx, result
+
+
 def query_model(task_name, args=None):
     """
-    loads the dataset from huggingface, query the GPT 4V model with the prompt and images, and saves the result to a json file with specific format.
-
+    Loads the dataset, processes items in batches, and performs batch inference.
+    Similar to MME-RealWorld-Lite's implementation.
+    
     Parameters:
     - task_name: String, the name of the task to evaluate.
     - args: command line arguments including model name
@@ -147,11 +219,10 @@ def query_model(task_name, args=None):
     - outputs, The result is also saved to 'output_filename.json'.
     """
     eval_split = args.eval_split
-
     dataset_local_path = args.dataset_local_path
     output_save_folder = getattr(args, 'output_save_folder', 'outputs')
     image_save_folder = getattr(args, 'image_save_folder', 'images')
-    num_threads = getattr(args, 'num_threads', 1)
+    batch_size = getattr(args, 'batch_size', 20)
     
     output_path = f'{output_save_folder}/{task_name.replace("_", " ")}.json'
     os.makedirs(output_save_folder, exist_ok=True)
@@ -163,7 +234,7 @@ def query_model(task_name, args=None):
     # If regen is True, clear existing outputs and start fresh
     if args.regen:
         outputs = {'val': [], 'test': []}
-        print(f"Regenerating {task_name} on {eval_splits} set (clearing existing outputs)")
+        print(f"Regenerating {task_name} on {eval_splits} set")
     elif not os.path.exists(output_path):
         outputs = {'val': [], 'test': []}
         print(f"Evaluating {task_name} on {eval_splits} set")
@@ -172,35 +243,35 @@ def query_model(task_name, args=None):
         outputs = json.load(open(output_path, 'r'))
         inferenced_idx = set([d['idx'] for d in outputs[eval_split]]) # already inferenced idx
     
-    # Thread lock for thread-safe updates
-    outputs_lock = threading.Lock()
+    # Use shared processor, llm, and sampling_params from args (initialized in main)
+    # If not initialized, initialize them (for backward compatibility)
+    if not hasattr(args, '_processor') or args._processor is None:
+        print(f"Initializing processor, tokenizer, and LLM for {task_name}...")
+        args._processor = AutoProcessor.from_pretrained(
+            args.model_name_or_path, trust_remote_code=True
+        )
+        args._tokenizer = AutoTokenizer.from_pretrained(
+            args.model_name_or_path, trust_remote_code=True
+        )
+        args._llm = init_vllm(args)
+        args._sampling_params = SamplingParams(
+            temperature=0.0,
+            max_tokens=8000,
+            stop_token_ids=[args._tokenizer.eos_token_id] + args._tokenizer.additional_special_tokens_ids,
+        )
     
-    def process_item(orig_d, split):
-        """Process a single data item"""
-        idx = orig_d['idx']
-        # Skip if already processed (unless regen is True)
-        if not args.regen and idx in inferenced_idx:
-            return None
-        
-        gold_answer = orig_d['answer']
-        all_choices = ['(A)', '(B)', '(C)', '(D)', '(E)'][:len(orig_d['choices'])]
-        image_paths, prompt = load_prompt(task_name, orig_d, image_folder, args)
-        gpt_answer = query_local(image_paths, prompt, args) # NOTE: main inference process
-        prediction = analyze_answer(orig_d, gpt_answer, all_choices)
-        
-        result = {'idx': idx, 'answer': gold_answer, 'full_prediction': gpt_answer, 'prediction': prediction, 'prompt': prompt}
-        
-        # Thread-safe update of outputs and file save
-        with outputs_lock:
-            outputs[split].append(result)
-            json.dump(outputs, open(output_path, 'w'), indent=4)
-        
-        return result
+    processor = args._processor
+    tokenizer = args._tokenizer
+    llm = args._llm
+    sampling_params = args._sampling_params
     
     for split in eval_splits:
-        data_files = {'val': f'{dataset_local_path}/{task_name}/val-00000-of-00001.parquet','test': f'{dataset_local_path}/{task_name}/test-00000-of-00001.parquet'}
+        data_files = {
+            'val': f'{dataset_local_path}/{task_name}/val-00000-of-00001.parquet',
+            'test': f'{dataset_local_path}/{task_name}/test-00000-of-00001.parquet'
+        }
         
-        if task_name == 'Relative_Reflectance': # 这个数据集有点问题，需要单独处理
+        if task_name == 'Relative_Reflectance':
             test_data = load_relative_reflectance_data(data_files)[split]
         else:
             test_data = load_dataset('parquet', data_files=data_files)[split]
@@ -211,32 +282,97 @@ def query_model(task_name, args=None):
         else:
             items_to_process = [orig_d for orig_d in test_data if orig_d['idx'] not in inferenced_idx]
         
-        if num_threads > 1 and len(items_to_process) > 0:
-            # Use concurrent processing
-            print(f"Processing {len(items_to_process)} items with {num_threads} threads...")
-            with ThreadPoolExecutor(max_workers=num_threads) as executor:
-                # Submit all tasks
-                future_to_item = {
-                    executor.submit(process_item, orig_d, split): orig_d 
-                    for orig_d in items_to_process
-                }
-                
-                # Process with progress bar
-                for future in tqdm(as_completed(future_to_item), total=len(items_to_process), desc=f"Processing {task_name} {split}"):
-                    orig_d = future_to_item[future]
-                    try:
-                        future.result()
-                    except Exception as e:
-                        print(f"Error processing item {orig_d.get('idx', 'unknown')}: {e}")
-                        import traceback
-                        traceback.print_exc()
-        else:
-            # Sequential processing (original behavior)
-            for orig_d in tqdm(items_to_process, desc=f"Processing {task_name} {split}"):
-                process_item(orig_d, split)
+        if len(items_to_process) == 0:
+            print(f"No items to process for {task_name} {split}")
+            continue
         
-        # Final save
+        print(f"Processing {len(items_to_process)} items for {task_name} {split}...")
+        
+        # Prepare data for batch processing (serial processing to avoid pickle issues with processor)
+        print("Preparing inputs (serial processing)...")
+        prepared_results = []
+        for idx, data in enumerate(tqdm(items_to_process, desc="Preparing inputs")):
+            result = _process_single_item_helper((idx, data, task_name, image_folder, processor, args))
+            prepared_results.append(result)
+        
+        # Extract inputs and metadata
+        inputs = [result[1] for result in prepared_results]
+        original_data_list = [result[1]["_original_data"] for result in prepared_results]
+        image_paths_list = [result[1]["_image_paths"] for result in prepared_results]
+        original_prompts = [result[1]["_original_prompt"] for result in prepared_results]
+        
+        # Remove metadata from inputs before passing to VLLM
+        for inp in inputs:
+            inp.pop("_original_data", None)
+            inp.pop("_image_paths", None)
+            inp.pop("_original_prompt", None)
+        
+        # Batch inference
+        print(f"Running batch inference with batch_size={batch_size}...")
+        all_responses = []
+        for idx in tqdm(range(0, len(inputs), batch_size), 
+                       desc="Inferencing",
+                       bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed} < {remaining}, {rate_fmt}]"):
+            batch_inputs = inputs[idx : idx + batch_size]
+            batch_outputs = llm.generate(batch_inputs, sampling_params)
+            
+            # Extract responses
+            for i in range(len(batch_outputs)):
+                response_text = batch_outputs[i].outputs[0].text
+                all_responses.append(response_text)
+        
+        # Post-process: judge answers (using multithreading)
+        print(f"Judging answers with 50 threads...")
+        
+        def judge_single_item(item_data):
+            """Judge a single item"""
+            orig_d, gpt_answer, prompt = item_data
+            idx = orig_d['idx']
+            gold_answer = orig_d['answer']
+            all_choices = ['(A)', '(B)', '(C)', '(D)', '(E)'][:len(orig_d['choices'])]
+            
+            prediction = analyze_answer(orig_d, gpt_answer, all_choices)
+            
+            result = {
+                'idx': idx,
+                'answer': gold_answer,
+                'full_prediction': gpt_answer,
+                'prediction': prediction,
+                'prompt': prompt
+            }
+            return result
+        
+        # Prepare data for threading
+        judge_data = list(zip(original_data_list, all_responses, original_prompts))
+        
+        # Use ThreadPoolExecutor with 50 threads
+        results_list = []
+        with ThreadPoolExecutor(max_workers=50) as executor:
+            future_to_item = {
+                executor.submit(judge_single_item, item_data): item_data
+                for item_data in judge_data
+            }
+            
+            for future in tqdm(as_completed(future_to_item), total=len(judge_data), desc="Judging"):
+                try:
+                    result = future.result()
+                    results_list.append(result)
+                except Exception as e:
+                    item_data = future_to_item[future]
+                    print(f"Error judging item {item_data[0].get('idx', 'unknown')}: {e}")
+                    import traceback
+                    traceback.print_exc()
+        
+        # Sort results by idx to maintain order
+        results_list.sort(key=lambda x: x['idx'])
+        
+        # Add to outputs
+        for result in results_list:
+            outputs[split].append(result)
+        
+        # Save after processing each split
         json.dump(outputs, open(output_path, 'w'), indent=4)
+        print(f"Saved results to {output_path}")
         
     return outputs
 
@@ -411,8 +547,7 @@ def load_prompt(task_name, d, image_folder, args):
         prompt = args.pre_prompt + "\n" + prompt
     if task_name in need_disclaimer_tasks:
         prompt = disclaimer + prompt
-    if 'blip' in model_name:
-        prompt += '\nAnswer:'
+    # Note: removed 'blip' check as it's no longer needed
     if args.after_prompt:
         prompt = prompt + "\n" + args.after_prompt
     
@@ -447,6 +582,27 @@ def normalize_answer(answer):
     return answer
 
 
+def init_vllm(args):
+    """
+    Initializes the VLLM model.
+    """
+    from vllm import LLM, SamplingParams
+
+    llm = LLM(
+            model=args.model_name_or_path,
+            trust_remote_code=True,
+            tensor_parallel_size=args.tp,
+            limit_mm_per_prompt={"image": 10, "video": 2},
+            gpu_memory_utilization=0.7,
+            # enforce_eager=True,
+            # mm_processor_kwargs={
+            #     "min_pixels": 28 * 28,
+            #     "max_pixels": 1024 * 1024,
+            # },
+        ) 
+    return llm
+
+
 def eval_task(task_name, args):
     outputs = query_model(task_name, args)
     accu = {'val': 0, 'test': 0}
@@ -466,8 +622,7 @@ def eval_task(task_name, args):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name_or_path", type=str, default='GPT4V', help="select the model name")
-    parser.add_argument("--inference_api", type=str, default='http://0.0.0.0:8080/v1', help="the inference api for local model serving")
+    parser.add_argument("--model_name_or_path", type=str, required=True, help="path to the model")
     parser.add_argument("--dataset_local_path", type=str, default='BLINK_fromhf', help="the local path to the dataset downloaded from huggingface")
     parser.add_argument("--task_name", type=str, default='Relative_Depth', help="select the task name")
     parser.add_argument("--eval_split", type=str, default='val', help="select the eval split")
@@ -475,7 +630,9 @@ def parse_args():
     parser.add_argument("--after_prompt", type=str, default='', help="the after-prompt for the model")
     parser.add_argument("--output_save_folder", type=str, default='outputs', help="directory to save output JSON files")
     parser.add_argument("--image_save_folder", type=str, default='images', help="directory to save processed images")
-    parser.add_argument("--num_threads", type=int, default=1, help="number of concurrent threads for processing (default: 1, sequential)")
+    parser.add_argument("--batch_size", type=int, default=20, help="batch size for inference (default: 20)")
+    parser.add_argument("--system_prompt", type=str, default='', help="the system prompt for the model")
+    parser.add_argument("--tp", type=int, default=1, help="the tensor parallel size for the model")
     parser.add_argument("--regen", action='store_true', help="regenerate the outputs")
     
     args = parser.parse_args()
@@ -486,13 +643,25 @@ if __name__ == '__main__':
     args = parse_args()
     model_path = args.model_name_or_path # model_path: 模型参数路径
     model_name = os.path.basename(model_path) # model_name: ckpt文件名
-    print(f'Using ckpt: {model_path}, model name: {model_name}')
-
-    model_generate_funcs = {
-        'GPT4V': query_gpt4v,                     
-    }
-
-    model_generate_funcs.get(model_name, query_local) # should go query_local
+    print(f'Using model: {model_path}, model name: {model_name}')
+    print(f'Batch size: {args.batch_size}')
+    
+    # Initialize processor, tokenizer, llm, and sampling_params once at program start
+    # All tasks will share these instances
+    print("Initializing LLM engine (shared across all tasks)...")
+    args._processor = AutoProcessor.from_pretrained(
+        args.model_name_or_path, trust_remote_code=True
+    )
+    args._tokenizer = AutoTokenizer.from_pretrained(
+        args.model_name_or_path, trust_remote_code=True
+    )
+    args._llm = init_vllm(args)
+    args._sampling_params = SamplingParams(
+        temperature=0.0,
+        max_tokens=8000,
+        stop_token_ids=[args._tokenizer.eos_token_id] + args._tokenizer.additional_special_tokens_ids,
+    )
+    print("LLM engine initialized successfully!")
     
     # need_disclaimer_tasks = ['Forensic_Detection', 'Jigsaw', 'Art_Style']
     need_disclaimer_tasks = []
@@ -507,11 +676,3 @@ if __name__ == '__main__':
         eval_task(task_name, args)
     
     print("All tasks done!")
-    # 退出脚本
-    import sys
-    sys.exit(0)
-# if __name__ == '__main__':
-#     load_relative_reflectance_data({
-#         "val": "data/Relative_Reflectance/val-00000-of-00001.parquet",
-#         "test": "data/Relative_Reflectance/test-00000-of-00001.parquet"
-#     })

@@ -109,9 +109,6 @@ else
     cot_suffix=""
 fi
 
-# 确保统一输出目录存在
-mkdir -p "$UNIFIED_RESULT_BASE"
-
 # 打印最终生效的配置
 echo "================================================="
 echo "Final Configuration for RealWorldQA Run:"
@@ -120,7 +117,6 @@ echo "GPU ID in use (CUDA_VISIBLE_DEVICES): $CUDA_VISIBLE_DEVICES"
 echo "Model Checkpoint Path: $CKPT_PATH"
 echo "Inference Run ID: $INFERENCE_RUN_ID"
 echo "Unified Result Base: $UNIFIED_RESULT_BASE"
-echo "VLLM Inference Port: $VLLM_INFERENCE_PORT"
 echo "CoT Setting: $cot_prompt_settings"
 echo "Batch Size (bz): $bz"
 echo "================================================="
@@ -131,8 +127,10 @@ echo "================================================="
 # =========================================================================
 
 run_realworldqa() {
-    local PORT="${1:-$VLLM_INFERENCE_PORT}"
-    local LOG_DIR="$UNIFIED_RESULT_BASE"
+    # New structure: results/$UNIFIED_RESULT_DIR/realworldqa/$SHARED_TIMESTAMP/
+    local BENCHMARK_NAME="realworldqa${cot_suffix}"
+    local BENCHMARK_DIR="$UNIFIED_RESULT_BASE/$BENCHMARK_NAME"
+    local LOG_DIR="$BENCHMARK_DIR/$SHARED_TIMESTAMP"
     mkdir -p "$LOG_DIR"
     
     echo "=============================="
@@ -158,19 +156,19 @@ run_realworldqa() {
         --input_file "data/RealWorldQA.json" \
         --use_cot $use_cot \
         --pre_prompt "$pre_prompt" \
-        --save_name "$UNIFIED_RESULT_BASE/realworldqa_inferenced${cot_suffix}.jsonl" \
+        --save_name "$BENCHMARK_DIR/$SHARED_TIMESTAMP/realworldqa_inferenced${cot_suffix}.jsonl" \
         --tp 1 \
         --bz "$bz" \
         --max_new_tokens 8000 > "$LOG_DIR/realworldqa_inference$cot_suffix.log" 2>&1
     
     echo "Calculating scores for RealWorldQA..."
     python judge.py \
-        --input_file "$UNIFIED_RESULT_BASE/realworldqa_inferenced${cot_suffix}.jsonl" \
+        --input_file "$BENCHMARK_DIR/$SHARED_TIMESTAMP/realworldqa_inferenced${cot_suffix}.jsonl" \
         --judge_api "$CUSTOMIZED_REMOTE_OPENAI_API_ENDPOINT" \
         --api_key "$CUSTOMIZED_REMOTE_OPENAI_API_KEY" \
-        --output_file "$UNIFIED_RESULT_BASE/realworldqa_judged${cot_suffix}.jsonl" > "$LOG_DIR/realworldqa_judge$cot_suffix.log" 2>&1
+        --output_file "$BENCHMARK_DIR/$SHARED_TIMESTAMP/realworldqa_judged${cot_suffix}.jsonl" > "$LOG_DIR/realworldqa_judge$cot_suffix.log" 2>&1
     
-    echo "RealWorldQA evaluation completed. Results in: $UNIFIED_RESULT_BASE/realworldqa_judged${cot_suffix}.jsonl"
+    echo "RealWorldQA evaluation completed. Results in: $BENCHMARK_DIR/$SHARED_TIMESTAMP/realworldqa_judged${cot_suffix}.jsonl"
     echo "RealWorldQA DONE" > "$LOG_DIR/realworldqa_done$cot_suffix.flag"
 }
 

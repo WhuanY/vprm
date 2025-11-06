@@ -85,11 +85,8 @@ bash run_all.sh --ckpt-path /path/to/model --benchmarks mathvista,blink --run-id
 #### How It Works
 
 - **Automatic GPU Assignment**: Each benchmark is assigned one dedicated GPU automatically
-- **Automatic Port Assignment**: Benchmarks that require VLLM serve get unique ports (9751, 9752, etc.)
 - **Parallel Execution**: All benchmarks run in parallel as background processes
-- **Smart Resource Management**: 
-  - Benchmarks requiring VLLM serve: `mathvista`, `blink`
-  - Benchmarks using direct inference: `mathvision`, `mme_realworld`, `realworldqa`, `chartqa`, `mmstar`
+- **Batch Processing**: All benchmarks use batch processing for efficient inference
 
 ---
 
@@ -107,12 +104,12 @@ All benchmark scripts support these common arguments:
 | `-g, --gpu-id <id>` | GPU ID to use | `0` |
 | `-i, --run-id <id>` | Run ID | Auto-generated |
 | `-c, --use-cot <0\|1>` | Use Chain of Thought (1=yes, 0=no) | `1` |
-| `-p, --port <port>` | VLLM inference port (if needed) | From `config.sh` |
+| `-b, --bz <size>` | Batch size for inference | Benchmark-specific (see below) |
 | `-h, --help` | Show help message | - |
 
 #### Benchmark-Specific Examples
 
-**MathVista** (requires VLLM serve):
+**MathVista**:
 ```bash
 # Use default settings
 bash benchmarks/mathvista.sh
@@ -121,77 +118,90 @@ bash benchmarks/mathvista.sh
 bash benchmarks/mathvista.sh \
   --ckpt-path /path/to/model \
   --gpu-id 0 \
-  --port 9753 \
   --use-cot 1 \
-  --num-threads 100
+  --bz 20
 
 # MathVista also supports:
-#   -n, --num-threads <num>    Number of concurrent threads (default: 100)
+#   -b, --bz <size>            Batch size for inference (default: 100)
 ```
 
-**MathVision** (direct inference, no serve needed):
+**MathVision**:
 ```bash
 bash benchmarks/mathvision.sh \
   --ckpt-path /path/to/model \
   --gpu-id 1 \
   --use-cot 0 \
-  --subset testmini
+  --subset testmini \
+  --bz 50
 
 # MathVision also supports:
 #   -s, --subset <subset>      'testmini' or 'test' (default: testmini)
+#   -b, --bz <size>            Batch size for inference (default: 100)
 ```
 
-**BLINK** (requires VLLM serve):
+**BLINK**:
 ```bash
 bash benchmarks/blink.sh \
   --ckpt-path /path/to/model \
   --gpu-id 2 \
-  --port 9751 \
   --use-cot 1 \
-  --task-name all
+  --task-name all \
+  --bz 50
 
 # BLINK also supports:
 #   -t, --task-name <name>     Task name (default: all)
+#   -b, --bz <size>            Batch size for inference (default: 50)
 ```
 
-**ChartQA** (direct inference):
+**ChartQA**:
 ```bash
 bash benchmarks/chartqa.sh \
   --ckpt-path /path/to/model \
   --gpu-id 3 \
   --use-cot 1 \
-  --split test
+  --split test \
+  --bz 50
 
 # ChartQA also supports:
 #   -s, --split <split>        'test' or 'val' (default: test)
+#   -b, --bz <size>            Batch size for inference (default: 50)
 ```
 
-**MME-RealWorld-Lite** (direct inference):
+**MME-RealWorld-Lite**:
 ```bash
 bash benchmarks/mme_realworld.sh \
   --ckpt-path /path/to/model \
   --gpu-id 4 \
   --use-cot 1 \
-  --image-base-dir /path/to/images
+  --bz 50
 
 # MME-RealWorld-Lite also supports:
-#   -b, --image-base-dir <dir> Base directory for images
+#   -b, --bz <size>            Batch size for inference (default: 50)
+# Note: Image base directory is hardcoded in the script
 ```
 
-**RealWorldQA** (direct inference):
+**RealWorldQA**:
 ```bash
 bash benchmarks/realworldqa.sh \
   --ckpt-path /path/to/model \
   --gpu-id 5 \
-  --use-cot 1
+  --use-cot 1 \
+  --bz 50
+
+# RealWorldQA also supports:
+#   -b, --bz <size>            Batch size for inference (default: 50)
 ```
 
-**MMStar** (direct inference):
+**MMStar**:
 ```bash
 bash benchmarks/mmstar.sh \
   --ckpt-path /path/to/model \
   --gpu-id 6 \
-  --use-cot 1
+  --use-cot 1 \
+  --bz 50
+
+# MMStar also supports:
+#   -b, --bz <size>            Batch size for inference (default: 50)
 ```
 
 #### Viewing Help for Any Script
@@ -206,28 +216,37 @@ bash benchmarks/chartqa.sh --help
 
 ---
 
-## Benchmark Dependencies
+## Benchmark Architecture
 
-### Benchmarks Requiring VLLM Serve
+### Direct VLLM Model Loading
 
-These benchmarks need a VLLM inference server running:
+All benchmarks now use **direct VLLM model loading** with batch processing:
 
-- **MathVista**: Uses `--inference_api` parameter
-- **BLINK**: Uses `INFERENCE_ENDPOINT` environment variable
+- **No External Server Required**: All benchmarks load the model directly using `vllm.LLM`
+- **Batch Processing**: Efficient batch inference for better GPU utilization
+- **Automatic Resource Management**: Each benchmark manages its own VLLM instance
+- **Consistent Interface**: All benchmarks use the same batch processing approach
 
-When running these via `run_all.sh`, the VLLM server is automatically started and managed. When running individually, you must either:
-1. Start the VLLM server manually before running, OR
-2. The script will attempt to check if the server is healthy (BLINK only)
+### Batch Size Configuration
 
-### Benchmarks Using Direct Inference
+Each benchmark has a default batch size that can be customized:
 
-These benchmarks run inference directly (no serve needed):
+- **MathVista**: Default batch size 100
+- **MathVision**: Default batch size 100
+- **BLINK**: Default batch size 50
+- **ChartQA**: Default batch size 50
+- **MME-RealWorld-Lite**: Default batch size 50
+- **RealWorldQA**: Default batch size 50
+- **MMStar**: Default batch size 50
 
-- **MathVision**: Direct model inference
-- **MME-RealWorld-Lite**: Direct model inference
-- **RealWorldQA**: Direct model inference
-- **ChartQA**: Direct model inference
-- **MMStar**: Direct model inference
+Adjust batch size based on your GPU memory:
+```bash
+# Use smaller batch size for limited GPU memory
+bash benchmarks/mathvista.sh --bz 20
+
+# Use larger batch size for high-memory GPUs
+bash benchmarks/mathvista.sh --bz 200
+```
 
 ---
 
@@ -241,9 +260,10 @@ logs/{RUN_ID}/
 ```
 
 Each benchmark has its own log file:
-- `{benchmark}_run.log`: Main execution log
+- `{benchmark}_run.log`: Main execution log from `run_all.sh`
 - `{benchmark}_inference.log`: Inference process log
-- `vllm_server_{port}.log`: VLLM server log (if applicable)
+- `{benchmark}_extract.log`: Answer extraction log (if applicable)
+- `{benchmark}_judge.log`: Judging/evaluation log (if applicable)
 
 ### Real-Time Monitoring
 
@@ -261,15 +281,29 @@ tail -f logs/{RUN_ID}/mathvista_run.log
 
 ## Results
 
-After running the benchmarks, results will be available in:
+After running the benchmarks, results are organized in a unified directory structure:
 
-- **MathVista**: `MathVista/results/{RUN_ID}/scores_{RUN_ID}.json`
-- **MathVision**: `MathVision/data/MathVision-{subset}_judged_{RUN_ID}.jsonl`
-- **MME-RealWorld-Lite**: `MME-RealWorld-Lite/data/MME-RealWorld-Lite_judged_{RUN_ID}.jsonl`
-- **RealWorldQA**: `realworldqa/data/RealWorldQA_judged_{RUN_ID}.jsonl`
-- **BLINK**: `BLINK_Benchmark/eval/results/`
-- **ChartQA**: `ChartQA/data/chartQA_{split}_judged_{RUN_ID}.jsonl`
-- **MMStar**: `MMStar/data/mmstar_judged_{RUN_ID}.jsonl`
+```
+results/{MODEL_IDENTIFIER}/{BENCHMARK_NAME}/{TIMESTAMP}/
+```
+
+### Result Locations
+
+All results follow the pattern: `results/{MODEL_IDENTIFIER}/{BENCHMARK_NAME}/{TIMESTAMP}/`
+
+- **MathVista**: `results/{MODEL_ID}/mathvista*/{TIMESTAMP}/mathvista_scores*.json`
+- **MathVision**: `results/{MODEL_ID}/mathvision*/{TIMESTAMP}/mathvision_*_judged*.jsonl`
+- **MME-RealWorld-Lite**: `results/{MODEL_ID}/mme_realworld*/{TIMESTAMP}/mme_realworld_judged*.jsonl`
+- **RealWorldQA**: `results/{MODEL_ID}/realworldqa*/{TIMESTAMP}/realworldqa_judged*.jsonl`
+- **BLINK**: `results/{MODEL_ID}/blink*/{TIMESTAMP}/val_results_*.json`
+- **ChartQA**: `results/{MODEL_ID}/chartqa*/{TIMESTAMP}/chartqa_*_judged*.jsonl`
+- **MMStar**: `results/{MODEL_ID}/mmstar*/{TIMESTAMP}/mmstar_judged*.jsonl`
+
+### Directory Structure Details
+
+- **MODEL_IDENTIFIER**: Automatically generated from checkpoint path (e.g., `trm_140_base-rm_conflict-it1-trm-global_step_80-huggingface`)
+- **BENCHMARK_NAME**: Benchmark name with optional CoT suffix (e.g., `mathvista_cot`, `blink`)
+- **TIMESTAMP**: Shared timestamp for all benchmarks in the same run (e.g., `20251107_0222`)
 
 All logs are stored in: `logs/{RUN_ID}/`
 
@@ -296,12 +330,15 @@ Or run fewer benchmarks:
 bash run_all.sh --benchmarks mathvista,blink,mathvision  # Only 3 benchmarks
 ```
 
-### VLLM Server Not Starting
+### GPU Memory Issues
 
-If VLLM servers fail to start:
-1. Check the server log: `logs/{RUN_ID}/vllm_server_{port}.log`
-2. Ensure the GPU is not already in use
-3. Check if the port is already in use: `netstat -tuln | grep {port}`
+If you encounter GPU out-of-memory errors:
+1. Reduce batch size using `--bz` parameter:
+   ```bash
+   bash benchmarks/mathvista.sh --bz 10  # Use smaller batch size
+   ```
+2. Check GPU memory usage: `nvidia-smi`
+3. Ensure only one benchmark runs per GPU when using `run_all.sh`
 
 ### Raw Data Files Missing
 
@@ -347,8 +384,8 @@ bash run_all.sh --ckpt-path /path/to/model_v2
 # Run without CoT
 bash benchmarks/mathvista.sh --use-cot 0
 
-# Run with custom concurrency
-bash benchmarks/mathvista.sh --num-threads 200
+# Run with custom batch size
+bash benchmarks/mathvista.sh --bz 200
 ```
 
 ### Running Different Splits/Subsets
@@ -369,8 +406,10 @@ bash benchmarks/mathvision.sh --subset test
 
 - ✅ **Command-line arguments** override configuration for all scripts
 - ✅ **One-click execution** with `run_all.sh`
-- ✅ **Automatic resource allocation** (GPU and port assignment)
+- ✅ **Automatic GPU allocation** (one GPU per benchmark)
 - ✅ **Parallel execution** of all benchmarks
+- ✅ **Batch processing** for efficient inference
+- ✅ **Unified result directory structure** for easy organization
 - ✅ **Flexible selection** of which benchmarks to run
 - ✅ **Easy debugging** with comprehensive logging
 

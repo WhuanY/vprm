@@ -259,7 +259,12 @@ def main():
                 try:
                     future.result()
                 except Exception as e:
+                    # Exception already handled in process_problem, but log it here too
                     logging.error(f"Exception occurred while processing {pid}: {e}")
+                    # Ensure extraction field is set even if process_problem failed
+                    with results_lock:
+                        if 'extraction' not in results[pid]:
+                            results[pid]['extraction'] = ""
     else:
         # Single-threaded mode (original behavior)
         for i, pid in enumerate(tqdm(test_pids, desc="Processing problems")):
