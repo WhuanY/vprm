@@ -101,7 +101,6 @@ fi
 export CUDA_VISIBLE_DEVICES=$gpu_id
 
 # 根据 use_cot 值设置 prompt
-use_cot=1
 if [ $use_cot -eq 1 ]; then
     echo "Using CoT inference"
     pre_prompt="You FIRST think about the reasoning process as an internal monologue and then provide the final answer.\n The reasoning process MUST BE enclosed within <think> </think> tags. The final answer MUST BE put within <answer> </answer> tags."

@@ -50,6 +50,7 @@ BLINK_Benchmark/eval/saved_test_predictions
 BLINK_Benchmark/eval/val_predictions
 MathVista/results/
 MathVision/outputs/
+mme_realworld/*
 
 
 results/
