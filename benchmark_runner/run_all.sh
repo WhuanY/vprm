@@ -45,7 +45,7 @@ usage() {
 }
 
 # 定义所有可用的benchmark
-ALL_BENCHMARKS=("mathvista" "mathvision" "mme_realworld" "realworldqa" "blink" "chartqa" "mmstar")
+ALL_BENCHMARKS=("mathvista" "mathvision" "mme_realworld_lite" "mme_realworld" "realworldqa" "blink" "chartqa" "mmstar")
 
 # 解析命令行参数
 SELECTED_BENCHMARKS=""

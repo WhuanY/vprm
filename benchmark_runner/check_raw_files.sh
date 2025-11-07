@@ -178,6 +178,28 @@ check_chartqa() {
     echo "ChartQA data check completed."
 }
 
+check_mme_realworld() {
+    local MME_REALWORLD_DIR="$BASE_DIR/mme_realworld"
+    
+    # Create data directory
+    mkdir -p "$MME_REALWORLD_DIR/data"
+    
+    # Check JSON data
+    if [ ! -f "$MME_REALWORLD_DIR/data/MME_RealWorld.json" ]; then
+        echo "Warning: MME-RealWorld JSON data not found."
+        echo "Run: wget -O $MME_REALWORLD_DIR/data/MME_RealWorld.json https://huggingface.co/datasets/yifanzhang114/MME-RealWorld/resolve/main/MME_RealWorld.json"
+        return 1
+    fi
+
+    # Check image count
+    # 检查IMAGE_BASE_DIR_MME_REALWORLD目录下的存储大小是否大于50GB （一个不完整的检查）
+    if [ $(du -sh "$IMAGE_BASE_DIR_MME_REALWORLD" | awk '{print $1}') -lt 50 ]; then
+        echo "Warning: MME-RealWorld images size is less than 50GB. If you see this message, please check if the images are downloaded correctly."
+        echo "Please refer to the $MME_REALWORLD_DIR/README.md for how to download the images."
+        return 1
+    fi
+}
+
 # Main function to check all raw files
 check_all_raw_files() {
     echo "==============================="
@@ -185,11 +207,12 @@ check_all_raw_files() {
     
     check_mathvision || return 1
     # check_mathvista || return 1
-    # check_mme_realworld_lite || return 1
+    check_mme_realworld_lite || return 1
     check_realworldqa || return 1
     check_blink || return 1
     check_MMStar || return 1
     check_chartqa || return 1
+    check_mme_realworld || return 1
     
     echo "Raw data integrity check completed."
     echo "==============================="

@@ -9,22 +9,28 @@ import time
 
 def extract_answer_from_response(response):
     """
-    从response中提取单个字母答案
-    如果strip后只剩单个字母(A-E)，则返回该字母
-    如果找不到明确答案，返回None
+    try to extract the answer from the response, if the response contains <answer> tags, return the answer inside the tags.
+    if the response does not contain <answer> tags, we guess the answer from the response.
+    Since this benchmark is multiple-choice, the answer should be in the options.
     """
     if not response:
         return None
-    
-    # 清理响应文本
-    cleaned_response = response.replace("(", "").replace(")", "").strip()
-    
-    # 检查是否只有一个字符且是A-E
-    if len(cleaned_response) == 1 and cleaned_response.upper() in "ABCDE":
-        return cleaned_response.upper()
-    
-    # 如果没有找到明确答案，则返回None
-    return None
+    if "<answer>" in response and "</answer>" in response:
+        try:
+            extracted_answer = response.split("<answer>")[1].split("</answer>")[0].strip()
+            for option in "ABCDE":
+                if extracted_answer.upper() in [option, f"({option})", f"({option})", f"{option}."]:
+                    return option
+            # if the extracted answer is not in the options, return None
+            return None
+        except:
+            return None
+    else: # fallback to guess the answer from the response
+        cleaned_response = response.replace("(", "").replace(")", "").replace(".", "").strip()
+
+        if cleaned_response.upper() in "ABCDE":
+            return cleaned_response.upper()
+        return None
 
 
 def judge_with_gpt4o(response, golden_ans, question, id_field, client):
@@ -191,7 +197,7 @@ def main(args):
             
             print(f"ID: {id_field}, Method: {method}, Subcategory: {subcategory}")
             
-            # 步骤1：尝试提取答案
+            # 尝试提取答案
             gen_answer = extract_answer_from_response(response)
             
             # 判断逻辑

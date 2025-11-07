@@ -2,12 +2,12 @@
 # config.sh - Common configuration variables for all benchmark scripts
 
 # GPU Configuration
-export CUDA_DEVICES_LIST="5,6,7,8,9"
+export CUDA_DEVICES_LIST="6,7"
 IFS=',' read -ra CUDA_DEVICES_ARRAY <<< "$CUDA_DEVICES_LIST"
 
 # API Endpoints for evaluation
 export CUSTOMIZED_REMOTE_OPENAI_API_ENDPOINT="https://aigc.x-see.cn/v1"
-export CUSTOMIZED_REMOTE_OPENAI_API_KEY="sk-xxxxxxxxxxxxxx"
+export CUSTOMIZED_REMOTE_OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # VLLM Configuration
 export VLLM_WORKER_MULTIPROC_METHOD="spawn"
@@ -17,6 +17,7 @@ export VLLM_TENSOR_PARALLEL_SIZE=1
 # Benchmark Configuration
 export MATHVISION_SUBSET="testmini"  # "testmini" or "test"
 export IMAGE_BASE_DIR_MME_REALWORLD_LITE="/mnt/minyingqian/MME-RealWorld-Lite-data/data/imgs"
+export IMAGE_BASE_DIR_MME_REALWORLD="/home/minyingqian/vprm/mme_realworld/data/images"
 
 # Model Checkpoint Path (modify this to your checkpoint path)
 # Only set default if not already set as environment variable
