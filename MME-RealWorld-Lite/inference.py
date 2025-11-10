@@ -52,6 +52,12 @@ def _process_single_item_helper(data_with_args):
         messages = [{"role": "user", "content": content}]
         if system_prompt:
             messages.insert(0, {"role": "system", "content": system_prompt})
+
+        if args.pre_prompt:
+            prompt = args.pre_prompt + prompt
+        
+        if args.after_prompt:
+            prompt = prompt + args.after_prompt
         
         prompt = processor.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
